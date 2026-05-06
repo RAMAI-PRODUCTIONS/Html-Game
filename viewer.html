@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>GLB Instancer</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { background:#000; overflow:hidden; font-family:'Courier New',monospace; touch-action:none; }
+        canvas { display:block; }
+
+        /* ── Top bar ── */
+        #topbar {
+            position:fixed; top:0; left:0; right:0; z-index:100;
+            background:rgba(0,0,0,0.82); backdrop-filter:blur(4px);
+            display:flex; flex-wrap:wrap; gap:5px; padding:6px 8px;
+            align-items:center; border-bottom:1px solid #333;
+        }
+        #topbar select {
+            flex:1; min-width:130px; padding:5px 8px; font-size:12px;
+            background:#1a1a1a; color:#eee; border:1px solid #444; border-radius:4px;
+        }
+        #topbar button {
+            padding:5px 11px; font-size:12px; border:none; border-radius:4px;
+            cursor:pointer; font-family:inherit; font-weight:bold;
+        }
+        .btn-load  { background:#27ae60; color:#fff; }
+        .btn-spawn { background:#2980b9; color:#fff; }
+        .btn-clear { background:#c0392b; color:#fff; }
+        .btn-tog   { background:#7f8c8d; color:#fff; }
+
+        /* ── Perf HUD ── */
+        #hud {
+            position:fixed; top:52px; right:8px; z-index:100;
+            background:rgba(0,0,0,0.78); border:1px solid #333;
+            border-radius:6px; padding:8px 12px; min-width:180px;
+            font-size:11px; color:#ccc; line-height:1.7;
+        }
+        #hud .val { color:#0ff; font-weight:bold; }
+        #hud .warn { color:#f90; }
+        #hud .bad  { color:#f44; }
+        #hud .good { color:#4f4; }
+
+        /* ── Quality badge ── */
+        #qualBadge {
+            position:fixed; bottom:10px; left:10px; z-index:100;
+            background:rgba(0,0,0,0.7); color:#ff0; font-size:11px;
+            padding:3px 8px; border-radius:4px; font-family:inherit;
+        }
+
+        /* ── Status overlay ── */
+        #status {
+            position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+            background:rgba(0,0,0,0.88); color:#fff; padding:18px 28px;
+            border-radius:8px; font-size:15px; z-index:200; text-align:center;
+            border:1px solid #555; display:none;
+        }
+
+        /* ── Shadow toggle indicator ── */
+        #shadowInd {
+            position:fixed; bottom:10px; right:10px; z-index:100;
+            background:rgba(0,0,0,0.7); color:#aaa; font-size:11px;
+            padding:3px 8px; border-radius:4px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── UI ── -->
+<div id="topbar">
+    <select id="modelSelect">
+        <option value="CONTENT/MESHES/kenney_blocky-characters_20/character-a.glb">Character A</option>
+        <option value="CONTENT/MESHES/kenney_blocky-characters_20/character-b.glb">Character B</option>
+        <option value="CONTENT/MESHES/kenney_blocky-characters_20/character-c.glb">Character C</option>
+        <option value="CONTENT/MESHES/kenney_blocky-characters_20/character-d.glb">Character D</option>
+        <option value="CONTENT/MESHES/kenney_car-kit/sedan.glb">Sedan</option>
+        <option value="CONTENT/MESHES/kenney_car-kit/race.glb">Race Car</option>
+        <option value="CONTENT/MESHES/kenney_car-kit/police.glb">Police Car</option>
+        <option value="CONTENT/MESHES/kenney_car-kit/ambulance.glb">Ambulance</option>
+        <option value="CONTENT/MESHES/kenney_car-kit/truck.glb">Truck</option>
+        <option value="CONTENT/MESHES/kenney_city-kit-commercial_2.1/building-a.glb">Building A</option>
+        <option value="CONTENT/MESHES/kenney_city-kit-commercial_2.1/building-skyscraper-a.glb">Skyscraper</option>
+    </select>
+    <button class="btn-load"  id="btnLoad">LOAD</button>
+    <button class="btn-spawn" id="btnSpawn">SPAWN 2000</button>
+    <button class="btn-tog"   id="btnShadow">SHADOW: ON</button>
+    <button class="btn-clear" id="btnClear">CLEAR</button>
+</div>
+
+<!-- ── Perf HUD ── -->
+<div id="hud">
+    <div>FPS  <span class="val" id="hFps">--</span></div>
+    <div>MS   <span class="val" id="hMs">--</span></div>
+    <div>DRAW <span class="val" id="hDraw">--</span></div>
+    <div>TRIS <span class="val" id="hTris">--</span></div>
+    <div>INST <span class="val" id="hInst">0</span></div>
+    <div>MEM  <span class="val" id="hMem">--</span></div>
+    <div>QUAL <span class="val" id="hQual">--</span></div>
+</div>
+
+<div id="qualBadge" id="qualBadge">Q: AUTO</div>
+<div id="shadowInd">SHADOW: PCF-SOFT</div>
+<div id="status"></div>
+
+<!-- Stash native Image before any patches -->
+<script>window._NativeImage = window.Image;</script>
+
+<!-- ── Patch fetch() for file:// binary loading (Android WebView) ── -->
+<script>
+(function(){
+    // 1. Patch fetch — for GLB/bin binary loading
+    var _fetch = window.fetch;
+    window.fetch = function(input, init){
+        var url = (input && input.url) ? input.url : String(input);
+        var isFile = url.indexOf('file://') === 0 || url.indexOf('file:///android_asset') === 0;
+        var isRel  = url.indexOf('http') !== 0 && url.indexOf('data:') !== 0 && url.indexOf('blob:') !== 0;
+        if (isFile || isRel){
+            return new Promise(function(res,rej){
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', url, true);
+                xhr.responseType = 'arraybuffer';
+                xhr.onload = function(){
+                    if(xhr.status===200||xhr.status===0){
+                        var ext = url.split('.').pop().toLowerCase();
+                        var ct  = {glb:'model/gltf-binary',gltf:'model/gltf+json',bin:'application/octet-stream',
+                                   png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg'}[ext]||'application/octet-stream';
+                        res(new Response(xhr.response,{status:200,headers:{'Content-Type':ct,'Content-Length':xhr.response.byteLength}}));
+                    } else { rej(new TypeError('fetch failed: '+url)); }
+                };
+                xhr.onerror = function(){ rej(new TypeError('fetch error: '+url)); };
+                xhr.send();
+            });
+        }
+        return _fetch ? _fetch.call(window, input, init) : Promise.reject(new Error('no fetch'));
+    };
+
+    // 2. Patch Image.src — for texture loading via Three.js ImageLoader
+    // Only intercept file:// and relative paths; blob:/data: pass through
+    var NativeImg = window._NativeImage;
+    var srcDesc = Object.getOwnPropertyDescriptor(NativeImg.prototype, 'src');
+    if (srcDesc && srcDesc.set) {
+        var _setSrc = srcDesc.set;
+        var _getSrc = srcDesc.get;
+        Object.defineProperty(NativeImg.prototype, 'src', {
+            configurable: true,
+            get: function() { return _getSrc.call(this); },
+            set: function(url) {
+                if (!url) { _setSrc.call(this, url); return; }
+                var isFile = url.indexOf('file://') === 0;
+                var isRel  = url.indexOf('http') !== 0 && url.indexOf('data:') !== 0 && url.indexOf('blob:') !== 0 && url.length > 1;
+                if (isFile || isRel) {
+                    var self = this;
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('GET', url, true);
+                    xhr.responseType = 'blob';
+                    xhr.onload = function() {
+                        if (xhr.status === 200 || xhr.status === 0) {
+                            _setSrc.call(self, URL.createObjectURL(xhr.response));
+                        } else {
+                            _setSrc.call(self, url);
+                        }
+                    };
+                    xhr.onerror = function() { _setSrc.call(self, url); };
+                    xhr.send();
+                } else {
+                    _setSrc.call(this, url);
+                }
+            }
+        });
+    }
+})();
+</script>
+
+<!-- Three.js r128 UMD + matching GLTFLoader (same version, no mismatch) -->
+<script src="assets/js/three.min.js"></script>
+<script src="assets/js/GLTFLoader.js"></script>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════════════
+//  GLOBALS
+// ═══════════════════════════════════════════════════════════════════════
+var scene, camera, renderer, sun;
+var instancedMeshes = [];
+var totalInstances  = 0;
+var shadowEnabled   = true;
+var qualityLevel    = 2;    // locked to HIGH
+
+// Perf tracking
+var frameCount = 0, lastFpsTime = performance.now(), lastFrameTime = performance.now();
+var currentFps = 60, currentMs = 16;
+
+// ═══════════════════════════════════════════════════════════════════════
+//  XHR BINARY LOADER  (avoids fetch() which is blocked on file://)
+// ═══════════════════════════════════════════════════════════════════════
+function loadBinary(url, onProg) {
+    return new Promise(function(res, rej) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.responseType = 'arraybuffer';
+        xhr.onprogress = function(e) { if (onProg && e.lengthComputable) onProg(e.loaded/e.total); };
+        xhr.onload = function() {
+            (xhr.status === 200 || xhr.status === 0) ? res(xhr.response) : rej(new Error('HTTP '+xhr.status));
+        };
+        xhr.onerror = function() { rej(new Error('XHR error: '+url)); };
+        xhr.send();
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  STATUS OVERLAY
+// ═══════════════════════════════════════════════════════════════════════
+var statusEl = document.getElementById('status');
+function setStatus(msg) {
+    statusEl.style.display = msg ? 'block' : 'none';
+    statusEl.textContent   = msg;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  BOOT — wait for Three.js then load GLTFLoader
+// ═══════════════════════════════════════════════════════════════════════
+window.onerror = function(m,s,l,c,e) { setStatus('JS ERROR: '+m+' ('+l+':'+c+')'); };
+
+if (typeof THREE === 'undefined') {
+    setStatus('ERROR: three.min.js not found in assets/js/');
+} else if (typeof THREE.GLTFLoader === 'undefined') {
+    setStatus('ERROR: GLTFLoader.js not found in assets/js/');
+} else {
+    bootScene();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SCENE SETUP
+// ═══════════════════════════════════════════════════════════════════════
+function bootScene() {
+    setStatus('');
+
+    // ── Renderer ──────────────────────────────────────────────────────
+    renderer = new THREE.WebGLRenderer({
+        antialias: false,           // off by default; adaptive quality may enable
+        powerPreference: 'high-performance',
+        stencil: false,
+        depth: true
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled  = true;
+    renderer.shadowMap.type     = THREE.PCFSoftShadowMap;  // self-shadowing quality
+    renderer.outputColorSpace    = THREE.SRGBColorSpace || THREE.LinearEncoding;
+    document.body.appendChild(renderer.domElement);
+
+    // ── Scene ─────────────────────────────────────────────────────────
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB);
+    scene.fog = new THREE.FogExp2(0x87CEEB, 0.008);
+
+    // ── Camera ────────────────────────────────────────────────────────
+    camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.5, 600);
+    camera.position.set(0, 18, 40);
+    camera.lookAt(0, 0, 0);
+
+    // ── Lighting ──────────────────────────────────────────────────────
+    // Hemisphere for sky/ground bounce
+    var hemi = new THREE.HemisphereLight(0xb0d8ff, 0x4a7c3f, 0.6);
+    scene.add(hemi);
+
+    // Main directional sun — casts + receives shadows
+    sun = new THREE.DirectionalLight(0xfff5e0, 1.2);
+    sun.position.set(40, 80, 30);
+    sun.castShadow = true;
+
+    // Shadow camera frustum — covers the whole spawn field
+    var sc = sun.shadow.camera;
+    sc.left = sc.bottom = -120;
+    sc.right = sc.top   =  120;
+    sc.near  = 1;
+    sc.far   = 300;
+
+    // Shadow map resolution — start high, adaptive quality may lower it
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias        = -0.0005;
+    sun.shadow.normalBias  =  0.02;
+    scene.add(sun);
+    scene.add(sun.target);  // target stays at origin
+
+    // Fill light (no shadow)
+    var fill = new THREE.DirectionalLight(0xaaccff, 0.3);
+    fill.position.set(-30, 20, -20);
+    scene.add(fill);
+
+    // ── Ground ────────────────────────────────────────────────────────
+    var groundMat = new THREE.MeshStandardMaterial({
+        color: 0x5a8a3c, roughness: 0.9, metalness: 0.0
+    });
+    var ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Subtle grid overlay
+    var grid = new THREE.GridHelper(400, 80, 0x000000, 0x000000);
+    grid.material.opacity = 0.12;
+    grid.material.transparent = true;
+    scene.add(grid);
+
+    // ── Touch / Mouse orbit ───────────────────────────────────────────
+    setupControls();
+
+    // ── UI wiring ─────────────────────────────────────────────────────
+    document.getElementById('btnLoad').onclick   = function() {
+        loadAndSpawn(document.getElementById('modelSelect').value, 2000);
+    };
+    document.getElementById('btnSpawn').onclick  = function() {
+        loadAndSpawn(document.getElementById('modelSelect').value, 2000);
+    };
+    document.getElementById('btnClear').onclick  = clearInstances;
+    document.getElementById('btnShadow').onclick = toggleShadow;
+
+    // ── Resize ────────────────────────────────────────────────────────
+    window.addEventListener('resize', function() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ── Render loop ───────────────────────────────────────────────────
+    animate();
+
+    // Auto-spawn on start
+    loadAndSpawn(document.getElementById('modelSelect').value, 2000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  LOAD GLB  →  BUILD InstancedMesh  →  SPAWN 2000+
+// ═══════════════════════════════════════════════════════════════════════
+function loadAndSpawn(url, count) {
+    clearInstances();
+    setStatus('Loading model...');
+
+    loadBinary(url, function(p) {
+        setStatus('Downloading... ' + Math.round(p*100) + '%');
+    }).then(function(buffer) {
+        setStatus('Parsing GLB...');
+        var basePath = url.substring(0, url.lastIndexOf('/') + 1);
+        var loader = new THREE.GLTFLoader();
+        loader.parse(buffer, basePath, function(gltf) {
+            setStatus('Building instances...');
+            setTimeout(function() {
+                buildInstances(gltf.scene, basePath, count);
+                setStatus('');
+            }, 50);
+        }, function(err) {
+            setStatus('Parse error: ' + (err.message || err));
+        });
+    }).catch(function(err) {
+        setStatus('Load error: ' + err.message);
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  TEXTURE CACHE  — XHR → blob URL, keyed by absolute URL
+//  Like an NES CHR-ROM bank: load once, reuse everywhere
+// ═══════════════════════════════════════════════════════════════════════
+var texCache = {};   // url → THREE.Texture
+
+function loadTextureCached(url) {
+    if (texCache[url]) return Promise.resolve(texCache[url]);
+    return new Promise(function(res, rej) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.responseType = 'blob';
+        xhr.onload = function() {
+            if (xhr.status === 200 || xhr.status === 0) {
+                var blobUrl = URL.createObjectURL(xhr.response);
+                var img = new window._NativeImage();
+                img.onload  = function() {
+                    var tex = new THREE.Texture(img);
+                    tex.needsUpdate = true;
+                    // Clamp to power-of-two for WebGL1 compat
+                    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+                    tex.minFilter = THREE.LinearMipMapLinearFilter;
+                    tex.magFilter = THREE.LinearFilter;
+                    tex.generateMipmaps = true;
+                    texCache[url] = tex;
+                    res(tex);
+                };
+                img.onerror = function() { rej(new Error('img load failed: ' + url)); };
+                img.src = blobUrl;
+            } else {
+                rej(new Error('XHR ' + xhr.status + ': ' + url));
+            }
+        };
+        xhr.onerror = function() { rej(new Error('XHR error: ' + url)); };
+        xhr.send();
+    });
+}
+
+// ── Extract meshes + materials from the loaded GLTF scene ─────────────
+// NES-style data architecture:
+//   • One merged geometry per unique material  (like a sprite sheet)
+//   • One InstancedMesh per merged geo/mat     (one draw call per "tile type")
+//   • All 2000 instance transforms in a flat Float32Array (like OAM table)
+function buildInstances(gltfScene, basePath, count) {
+    var SPREAD = 90;
+
+    // ── Step 1: compute model-level normalisation matrix ──────────────
+    // Fit the whole model into a 2-unit cube sitting on Y=0
+    var box = new THREE.Box3().setFromObject(gltfScene);
+    var size   = box.getSize(new THREE.Vector3());
+    var center = box.getCenter(new THREE.Vector3());
+    var modelScale = 2.0 / Math.max(size.x, size.y, size.z, 0.001);
+
+    // Normalisation matrix: scale → translate so bottom sits at Y=0
+    var normMat = new THREE.Matrix4()
+        .makeTranslation(-center.x, -box.min.y, -center.z)
+        .premultiply(new THREE.Matrix4().makeScale(modelScale, modelScale, modelScale));
+
+    // ── Step 2: collect mesh parts, group by material signature ───────
+    // Key insight: Kenney car-kit shares ONE colormap.png across all meshes.
+    // Characters each have their own texture.
+    // We group by texture URL so meshes sharing a texture become ONE InstancedMesh.
+    var groups = {};   // texKey → { geo: BufferGeometry[], mat: Material, texUrl }
+
+    gltfScene.updateMatrixWorld(true);
+
+    gltfScene.traverse(function(child) {
+        if (!child.isMesh || !child.geometry) return;
+
+        var srcMat = Array.isArray(child.material) ? child.material[0] : child.material;
+
+        // Determine texture key — use map URL if present, else color hex
+        var texUrl  = null;
+        var texKey  = 'solid_' + (srcMat && srcMat.color ? srcMat.color.getHexString() : 'cccccc');
+
+        if (srcMat && srcMat.map && srcMat.map.image && srcMat.map.image.src) {
+            // Texture already loaded by GLTFLoader (embedded or previously resolved)
+            texUrl = srcMat.map.image.src;
+            texKey = 'tex_' + texUrl;
+        } else if (srcMat && srcMat.map) {
+            // Map exists but image not loaded — build URL from basePath
+            // GLTFLoader stores the source URI on the texture's userData
+            var uri = (srcMat.map.userData && srcMat.map.userData.mimeType)
+                ? null
+                : (srcMat.map.name || null);
+            // Fallback: derive from model path convention
+            // e.g. basePath = "CONTENT/MESHES/kenney_car-kit/"
+            // texture = "Textures/colormap.png"
+            texKey = 'tex_' + basePath;
+        }
+
+        // Clone geometry and bake the child's world transform + normalisation
+        var geo = child.geometry.clone();
+        var worldMat = child.matrixWorld.clone();
+        worldMat.premultiply(normMat);
+        geo.applyMatrix4(worldMat);
+
+        if (!groups[texKey]) {
+            groups[texKey] = {
+                geos:   [],
+                srcMat: srcMat,
+                texUrl: texUrl,
+                basePath: basePath
+            };
+        }
+        groups[texKey].geos.push(geo);
+    });
+
+    if (Object.keys(groups).length === 0) {
+        setStatus('No meshes found!');
+        return;
+    }
+
+    // ── Step 3: pre-compute instance matrices once (flat OAM-style table) ─
+    // cols × rows grid with random jitter + rotation — computed ONCE, reused
+    // for every InstancedMesh (all share the same layout)
+    var cols    = Math.ceil(Math.sqrt(count));
+    var spacing = (SPREAD * 2) / cols;
+    var matrices = new Array(count);
+    var tmpDummy = new THREE.Object3D();
+
+    for (var i = 0; i < count; i++) {
+        var col = i % cols;
+        var row = Math.floor(i / cols);
+        tmpDummy.position.set(
+            -SPREAD + col * spacing + (Math.random() - 0.5) * spacing * 0.55,
+            0,
+            -SPREAD + row * spacing + (Math.random() - 0.5) * spacing * 0.55
+        );
+        tmpDummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+        var s = 0.75 + Math.random() * 0.5;
+        tmpDummy.scale.set(s, s, s);
+        tmpDummy.updateMatrix();
+        matrices[i] = tmpDummy.matrix.clone();
+    }
+
+    // ── Step 4: merge geos per group, build InstancedMesh, load texture ─
+    var groupKeys = Object.keys(groups);
+    var pending   = groupKeys.length;
+
+    groupKeys.forEach(function(key) {
+        var grp = groups[key];
+
+        // Merge all sub-geometries into one (like packing sprites into a sheet)
+        var mergedGeo;
+        if (grp.geos.length === 1) {
+            mergedGeo = grp.geos[0];
+        } else {
+            mergedGeo = mergeGeometries(grp.geos);
+        }
+
+        // Build material — start with solid colour, upgrade with texture async
+        var srcMat = grp.srcMat;
+        var instMat = new THREE.MeshStandardMaterial({
+            color:     srcMat && srcMat.color ? srcMat.color.clone() : new THREE.Color(0xcccccc),
+            roughness: srcMat && srcMat.roughness != null ? srcMat.roughness : 0.8,
+            metalness: srcMat && srcMat.metalness != null ? srcMat.metalness : 0.05,
+            side:      THREE.FrontSide,
+        });
+
+        // Build InstancedMesh immediately with solid colour so it renders right away
+        var iMesh = new THREE.InstancedMesh(mergedGeo, instMat, count);
+        iMesh.castShadow    = true;
+        iMesh.receiveShadow = true;
+        iMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+
+        // Write pre-computed matrices (shared OAM table)
+        for (var i = 0; i < count; i++) {
+            iMesh.setMatrixAt(i, matrices[i]);
+        }
+        iMesh.instanceMatrix.needsUpdate = true;
+        scene.add(iMesh);
+        instancedMeshes.push(iMesh);
+
+        // ── Async texture upgrade ──────────────────────────────────────
+        // Resolve texture URL: prefer already-loaded image src, else XHR from basePath
+        var texPromise = null;
+
+        if (grp.texUrl) {
+            // Already have a blob/data URL from GLTFLoader
+            texPromise = Promise.resolve(null); // texture already on srcMat.map
+            if (srcMat && srcMat.map) {
+                instMat.map = srcMat.map;
+                instMat.needsUpdate = true;
+            }
+        } else if (srcMat && srcMat.map) {
+            // GLTFLoader has a map but image.src not set — try to get URL from userData
+            // or fall back to convention: basePath + "Textures/" + first png
+            var guessUrl = grp.basePath + 'Textures/';
+            // For car-kit: colormap.png; for characters: texture-X.png
+            // We'll try to read the texture name from the map's source
+            var mapName = srcMat.map.name || '';
+            if (mapName) {
+                guessUrl += mapName + '.png';
+            } else {
+                // Last resort: scan known conventions
+                guessUrl = null;
+            }
+            if (guessUrl) {
+                texPromise = loadTextureCached(guessUrl).then(function(tex) {
+                    instMat.map = tex;
+                    instMat.needsUpdate = true;
+                }).catch(function(e) {
+                    console.warn('Texture load failed:', e.message);
+                });
+            }
+        }
+
+        // If GLTFLoader already embedded the texture image, just use it directly
+        if (!texPromise && srcMat && srcMat.map && srcMat.map.image) {
+            instMat.map = srcMat.map;
+            instMat.needsUpdate = true;
+        }
+    });
+
+    totalInstances = count;
+    document.getElementById('hInst').textContent = count.toLocaleString();
+    console.log('Spawned ' + count + ' instances across ' + groupKeys.length + ' InstancedMesh(es)');
+}
+
+// ── Minimal geometry merger (replaces BufferGeometryUtils dependency) ──
+// NES-style: pack all vertex data into flat typed arrays, one concat pass
+function mergeGeometries(geos) {
+    var totalVerts = 0, totalIdx = 0, hasIndex = false;
+    geos.forEach(function(g) {
+        totalVerts += g.attributes.position.count;
+        if (g.index) { totalIdx += g.index.count; hasIndex = true; }
+    });
+
+    var positions = new Float32Array(totalVerts * 3);
+    var normals   = new Float32Array(totalVerts * 3);
+    var uvs       = new Float32Array(totalVerts * 2);
+    var indices   = hasIndex ? new Uint32Array(totalIdx) : null;
+
+    var vOff = 0, iOff = 0, vBase = 0;
+    geos.forEach(function(g) {
+        var pos = g.attributes.position.array;
+        var nor = g.attributes.normal   ? g.attributes.normal.array   : null;
+        var uv  = g.attributes.uv       ? g.attributes.uv.array       : null;
+        var vc  = g.attributes.position.count;
+
+        positions.set(pos, vOff * 3);
+        if (nor) normals.set(nor, vOff * 3);
+        if (uv)  uvs.set(uv,  vOff * 2);
+
+        if (hasIndex && g.index) {
+            var idx = g.index.array;
+            for (var j = 0; j < idx.length; j++) indices[iOff + j] = idx[j] + vBase;
+            iOff += idx.length;
+        }
+        vBase += vc;
+        vOff  += vc;
+    });
+
+    var merged = new THREE.BufferGeometry();
+    merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    merged.setAttribute('normal',   new THREE.BufferAttribute(normals,   3));
+    merged.setAttribute('uv',       new THREE.BufferAttribute(uvs,       2));
+    if (indices) merged.setIndex(new THREE.BufferAttribute(indices, 1));
+    return merged;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  CLEAR
+// ═══════════════════════════════════════════════════════════════════════
+function clearInstances() {
+    instancedMeshes.forEach(function(m) {
+        scene.remove(m);
+        m.geometry.dispose();
+        if (Array.isArray(m.material)) m.material.forEach(function(mt){ mt.dispose(); });
+        else m.material.dispose();
+    });
+    instancedMeshes = [];
+    totalInstances  = 0;
+    document.getElementById('hInst').textContent = '0';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SHADOW TOGGLE
+// ═══════════════════════════════════════════════════════════════════════
+function toggleShadow() {
+    shadowEnabled = !shadowEnabled;
+    renderer.shadowMap.enabled = shadowEnabled;
+    // Force shadow map refresh
+    renderer.shadowMap.needsUpdate = true;
+    instancedMeshes.forEach(function(m) {
+        m.castShadow    = shadowEnabled;
+        m.receiveShadow = shadowEnabled;
+    });
+    document.getElementById('btnShadow').textContent = 'SHADOW: ' + (shadowEnabled ? 'ON' : 'OFF');
+    document.getElementById('shadowInd').textContent = shadowEnabled ? 'SHADOW: PCF-SOFT' : 'SHADOW: OFF';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  ADAPTIVE QUALITY SYSTEM
+//  Monitors FPS every 2s and adjusts: pixel ratio, shadow map, fog
+// ═══════════════════════════════════════════════════════════════════════
+var lastQualCheck = 0;
+var QUAL_INTERVAL = 2000; // ms between quality checks
+
+function adaptiveQuality(now) {
+    if (now - lastQualCheck < QUAL_INTERVAL) return;
+    lastQualCheck = now;
+
+    // Auto-quality disabled — locked to HIGH
+    var qEl = document.getElementById('hQual');
+    qEl.textContent = 'HIGH';
+    qEl.className   = 'val good';
+    document.getElementById('qualBadge').textContent = 'Q: HIGH (locked)';
+}
+
+function applyQuality() {
+    var configs = [
+        // LOW
+        { pr: 0.75, shadowMap: 512,  fog: 0.018, antialias: false },
+        // MED
+        { pr: 1.0,  shadowMap: 1024, fog: 0.010, antialias: false },
+        // HIGH
+        { pr: Math.min(window.devicePixelRatio, 2), shadowMap: 2048, fog: 0.006, antialias: true }
+    ];
+    var cfg = configs[qualityLevel];
+
+    renderer.setPixelRatio(cfg.pr);
+    if (sun && sun.shadow) {
+        sun.shadow.mapSize.set(cfg.shadowMap, cfg.shadowMap);
+        sun.shadow.map = null; // force rebuild
+        renderer.shadowMap.needsUpdate = true;
+    }
+    if (scene.fog) scene.fog.density = cfg.fog;
+
+    console.log('Quality → ' + ['LOW','MED','HIGH'][qualityLevel] + ' (PR:'+cfg.pr+' ShadowMap:'+cfg.shadowMap+')');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  RENDER LOOP
+// ═══════════════════════════════════════════════════════════════════════
+function animate() {
+    requestAnimationFrame(animate);
+
+    var now = performance.now();
+    currentMs = now - lastFrameTime;
+    lastFrameTime = now;
+
+    renderer.render(scene, camera);
+
+    // FPS counter
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+        currentFps = Math.round(frameCount * 1000 / (now - lastFpsTime));
+        frameCount  = 0;
+        lastFpsTime = now;
+        updateHUD(now);
+    }
+
+    adaptiveQuality(now);
+}
+
+function updateHUD(now) {
+    var info = renderer.info;
+
+    var fpsEl = document.getElementById('hFps');
+    fpsEl.textContent = currentFps;
+    fpsEl.className   = currentFps >= 30 ? 'val good' : currentFps >= 20 ? 'val warn' : 'val bad';
+
+    document.getElementById('hMs').textContent   = currentMs.toFixed(1) + ' ms';
+    document.getElementById('hDraw').textContent = info.render.calls;
+    document.getElementById('hTris').textContent = (info.render.triangles/1000).toFixed(1) + 'k';
+    document.getElementById('hInst').textContent = totalInstances.toLocaleString();
+
+    // Memory (Chrome/WebView exposes performance.memory)
+    if (performance.memory) {
+        var mb = (performance.memory.usedJSHeapSize / 1048576).toFixed(0);
+        document.getElementById('hMem').textContent = mb + ' MB';
+    } else {
+        document.getElementById('hMem').textContent = 'n/a';
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  TOUCH / MOUSE ORBIT CONTROLS
+// ═══════════════════════════════════════════════════════════════════════
+function setupControls() {
+    var sph = { theta: 0.5, phi: 0.9, r: 45 };
+    var target = new THREE.Vector3(0, 0, 0);
+    var drag = false, px = 0, py = 0, pinchD = 0;
+
+    function applyCamera() {
+        camera.position.set(
+            target.x + sph.r * Math.sin(sph.phi) * Math.sin(sph.theta),
+            target.y + sph.r * Math.cos(sph.phi),
+            target.z + sph.r * Math.sin(sph.phi) * Math.cos(sph.theta)
+        );
+        camera.lookAt(target);
+    }
+    applyCamera();
+
+    var el = renderer.domElement;
+
+    // Touch
+    el.addEventListener('touchstart', function(e) {
+        if (e.touches.length === 1) { drag=true; px=e.touches[0].clientX; py=e.touches[0].clientY; }
+        if (e.touches.length === 2) {
+            drag=false;
+            pinchD = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+        }
+    }, {passive:true});
+
+    el.addEventListener('touchmove', function(e) {
+        if (drag && e.touches.length===1) {
+            sph.theta -= (e.touches[0].clientX-px)*0.004;
+            sph.phi    = Math.max(0.05, Math.min(Math.PI-0.05, sph.phi+(e.touches[0].clientY-py)*0.004));
+            px=e.touches[0].clientX; py=e.touches[0].clientY;
+            applyCamera();
+        }
+        if (e.touches.length===2) {
+            var d = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+            sph.r = Math.max(5, Math.min(200, sph.r*(pinchD/d)));
+            pinchD=d; applyCamera();
+        }
+    }, {passive:true});
+
+    el.addEventListener('touchend', function() { drag=false; }, {passive:true});
+
+    // Mouse
+    el.addEventListener('mousedown', function(e) { drag=true; px=e.clientX; py=e.clientY; });
+    el.addEventListener('mousemove', function(e) {
+        if (!drag) return;
+        sph.theta -= (e.clientX-px)*0.004;
+        sph.phi    = Math.max(0.05, Math.min(Math.PI-0.05, sph.phi+(e.clientY-py)*0.004));
+        px=e.clientX; py=e.clientY; applyCamera();
+    });
+    el.addEventListener('mouseup',   function() { drag=false; });
+    el.addEventListener('wheel',     function(e) { sph.r=Math.max(5,Math.min(200,sph.r+e.deltaY*0.05)); applyCamera(); });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.ramai.glbviewer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.ramai.glbviewer"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            debuggable true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    // Package all GLB files and HTML into assets
+    sourceSets {
+        main {
+            assets {
+                srcDirs = ['src/main/assets']
+            }
+        }
+    }
+
+    // Ensure large GLB files are not compressed
+    aaptOptions {
+        noCompress 'glb', 'gltf', 'bin'
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'com.google.android.gms:play-services-ads:22.6.0'
+}
+
+// Custom task to copy web content and GLB files to assets
+task copyWebAssets(type: Copy) {
+    description = 'Copy HTML viewer and GLB files to assets directory'
+    
+    // Copy HTML file
+    from('../viewer.html') {
+        into 'www'
+        rename { 'index.html' }
+    }
+    
+    // Copy all CONTENT directory (includes all GLB files)
+    from('../CONTENT') {
+        into 'www/CONTENT'
+    }
+    
+    into 'src/main/assets'
+    
+    doLast {
+        println "✓ Copied web assets and GLB files to assets directory"
+    }
+}
+
+// Run copyWebAssets before processing resources
+preBuild.dependsOn copyWebAssets
+
+// Clean task to remove copied assets
+task cleanWebAssets(type: Delete) {
+    delete 'src/main/assets/www'
+}
+
+clean.dependsOn cleanWebAssets

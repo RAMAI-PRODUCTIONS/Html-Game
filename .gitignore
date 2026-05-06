@@ -1,0 +1,21 @@
+# Android build outputs
+android/app/build/
+android-gradle/app/build/
+android/.gradle/
+android-gradle/.gradle/
+
+# Local properties (contains SDK paths)
+android/local.properties
+android-gradle/local.properties
+
+# Gradle wrapper (optional - keep if you want reproducible builds)
+# *.jar
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.iml
+.idea/

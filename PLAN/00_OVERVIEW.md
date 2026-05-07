@@ -15,18 +15,24 @@
 | GLB Asset Loading | ✅ Working | XHR binary loader, texture cache |
 | Instanced Rendering | ✅ Working | 2000+ objects, 1 draw call per material |
 | Touch/Mouse Orbit | ✅ Working | Spherical coords, pinch zoom |
-| Performance HUD | ✅ Working | FPS, draw calls, tris, memory |
-| Adaptive Quality | ⚠️ Stubbed | Framework exists, locked to HIGH |
+| Performance HUD | ✅ Working | FPS, draw calls, tris, memory, ECS debug |
+| Adaptive Quality | ✅ Working | 3-tier system, auto FPS-based switching |
 | Android Build | ✅ Working | Gradle + WebView + AdMob |
 | Asset Library | ✅ Rich | 2000+ GLB models, 20+ kits |
-| Physics | ❌ Missing | No collision, gravity, dynamics |
+| **ECS Core** | ✅ **Complete** | Flat typed arrays, 2048 entity pool |
+| **Physics System** | ✅ **Complete** | Gravity, Euler integration, ground clamp, friction |
+| **AI System** | ✅ **Complete** | State machine (IDLE/PATROL/CHASE/ATTACK) |
+| **Input System** | ✅ **Complete** | Keyboard + virtual joystick, unified |
+| **Fixed Timestep Loop** | ✅ **Complete** | 60Hz physics, variable render, accumulator |
+| **Object Pool** | ✅ **Complete** | Zero-alloc spawning, mesh slot recycling |
+| **Follow Camera** | ✅ **Complete** | Smooth lerp tracking in ECS mode |
+| Collision Detection | ❌ Missing | No AABB, no raycasting |
 | Animation | ❌ Missing | No skeletal, no keyframes |
-| ECS / Gameplay | 📐 Planned | Architecture defined in `12_ECS_SINGLE_HTML.md` |
 | Audio | ❌ Missing | No Web Audio integration |
 | Particles | ❌ Missing | No GPU particles |
 | Post-Processing | ❌ Missing | No bloom, DOF, color grading |
 | LOD System | ❌ Missing | All models at full detail |
-| UI Framework | ❌ Missing | Only raw HTML buttons |
+| UI Framework | ⚠️ Basic | HTML buttons + HUD, no canvas UI |
 | Scene Editor | ❌ Missing | No level design tools |
 | Save/Load | ❌ Missing | No persistence |
 
@@ -46,21 +52,22 @@ A **modular, data-oriented HTML5 game engine** that:
 
 ## Document Index
 
-| File | Contents |
-|------|----------|
-| `01_ARCHITECTURE.md` | Full engine architecture, module breakdown |
-| `02_RENDERING_PIPELINE.md` | Renderer, shaders, post-processing, LOD |
-| `03_PHYSICS_SYSTEM.md` | Collision, rigid body, raycasting |
-| `04_ECS_GAMEPLAY.md` | Entity-Component-System, game loop |
-| `05_ANIMATION_SYSTEM.md` | Skeletal animation, blending, state machines |
-| `06_AUDIO_SYSTEM.md` | Web Audio API, spatial audio, music |
-| `07_UI_FRAMEWORK.md` | HUD, menus, dialogs, input |
-| `08_ASSET_PIPELINE.md` | Loading, streaming, LOD generation |
-| `09_EDITOR.md` | Browser-based level editor |
-| `10_ANDROID_BUILD.md` | APK pipeline, performance, AdMob |
-| `11_ROADMAP.md` | Phased implementation plan |
-| `TEMPLATE_BEST_CODE.md` | All best patterns from current codebase |
-| `12_ECS_SINGLE_HTML.md` | ECS architecture + single-HTML layout + NES-era data patterns |
+| File | Status | Contents |
+|------|--------|----------|
+| `00_OVERVIEW.md` | ✅ Current | This file — project vision and goals |
+| `STATUS.md` | ✅ **NEW** | **Detailed implementation status** — what's done, what's next |
+| `10_ROADMAP.md` | ✅ Updated | Phased implementation plan with completion tracking |
+| `12_ECS_SINGLE_HTML.md` | ✅ Complete | **IMPLEMENTED** — ECS architecture + NES-era data patterns |
+| `TEMPLATE_BEST_CODE.md` | ✅ Reference | All proven patterns from current codebase |
+| `01_ARCHITECTURE.md` | 📝 Planned | Full engine architecture, module breakdown |
+| `02_RENDERING_PIPELINE.md` | 📝 Planned | Renderer, shaders, post-processing, LOD |
+| `03_PHYSICS_SYSTEM.md` | 📝 Planned | Collision, rigid body, raycasting |
+| `04_ECS_GAMEPLAY.md` | 📝 Planned | Advanced gameplay systems |
+| `05_ANIMATION_SYSTEM.md` | 📝 Planned | Skeletal animation, blending, state machines |
+| `06_AUDIO_SYSTEM.md` | 📝 Planned | Web Audio API, spatial audio, music |
+| `07_UI_FRAMEWORK.md` | 📝 Planned | Canvas HUD, menus, dialogs |
+| `08_ASSET_PIPELINE.md` | 📝 Planned | Loading, streaming, LOD generation |
+| `09_EDITOR.md` | 📝 Planned | Browser-based level editor |
 
 ---
 

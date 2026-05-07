@@ -21,7 +21,7 @@
 | Asset Library | ✅ Rich | 2000+ GLB models, 20+ kits |
 | Physics | ❌ Missing | No collision, gravity, dynamics |
 | Animation | ❌ Missing | No skeletal, no keyframes |
-| ECS / Gameplay | ❌ Missing | No entities, components, systems |
+| ECS / Gameplay | 📐 Planned | Architecture defined in `12_ECS_SINGLE_HTML.md` |
 | Audio | ❌ Missing | No Web Audio integration |
 | Particles | ❌ Missing | No GPU particles |
 | Post-Processing | ❌ Missing | No bloom, DOF, color grading |
@@ -60,6 +60,7 @@ A **modular, data-oriented HTML5 game engine** that:
 | `10_ANDROID_BUILD.md` | APK pipeline, performance, AdMob |
 | `11_ROADMAP.md` | Phased implementation plan |
 | `TEMPLATE_BEST_CODE.md` | All best patterns from current codebase |
+| `12_ECS_SINGLE_HTML.md` | ECS architecture + single-HTML layout + NES-era data patterns |
 
 ---
 

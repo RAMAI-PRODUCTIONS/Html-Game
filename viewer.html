@@ -949,6 +949,12 @@ function bootScene() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // ── Apply initial quality tier ──────────────────────────────────
+  applyQuality();
+  document.getElementById('hQual').textContent = ['LOW','MED','HIGH'][qualityLevel];
+  document.getElementById('hQual').className   = 'val good';
+  document.getElementById('qualBadge').textContent = 'Q: '+['LOW','MED','HIGH'][qualityLevel];
+
   // ── Start loop + auto-load ───────────────────────────────────────
   _lastTime = performance.now();
   requestAnimationFrame(gameLoop);
@@ -1077,6 +1083,11 @@ function updateHUD() {
     document.getElementById('hMem').textContent = 'n/a';
   }
 
+  // Quality tier — keep in sync every HUD tick
+  var qEl = document.getElementById('hQual');
+  qEl.textContent = ['LOW','MED','HIGH'][qualityLevel];
+  qEl.className   = currentFps >= 30 ? 'val good' : currentFps >= 20 ? 'val warn' : 'val bad';
+
   // ECS debug panel
   if(ecsMode){
     var enemies=0, statics=0, dirty=0;
@@ -1102,18 +1113,14 @@ function adaptiveQuality() {
   if(currentFps < 25 && qualityLevel > 0){
     qualityLevel--;
     applyQuality();
-    qEl.textContent = ['LOW','MED','HIGH'][qualityLevel];
-    qEl.className   = 'val warn';
   } else if(currentFps > 55 && qualityLevel < 2){
     qualityLevel++;
     applyQuality();
-    qEl.textContent = ['LOW','MED','HIGH'][qualityLevel];
-    qEl.className   = 'val good';
-  } else {
-    qEl.textContent = ['LOW','MED','HIGH'][qualityLevel];
-    qEl.className   = currentFps>=30?'val good':'val warn';
   }
-  document.getElementById('qualBadge').textContent = 'Q: '+['LOW','MED','HIGH'][qualityLevel];
+  var label = ['LOW','MED','HIGH'][qualityLevel];
+  qEl.textContent = label;
+  qEl.className   = currentFps >= 30 ? 'val good' : currentFps >= 20 ? 'val warn' : 'val bad';
+  document.getElementById('qualBadge').textContent = 'Q: ' + label;
 }
 
 function applyQuality() {

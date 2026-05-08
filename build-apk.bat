@@ -81,7 +81,7 @@ echo ^<?xml version="1.0" encoding="utf-8"?^>>                                  
 echo ^<manifest xmlns:android="http://schemas.android.com/apk/res/android"^>>>                                                     "%MF%"
 echo     ^<uses-permission android:name="android.permission.INTERNET" /^>>>                                                        "%MF%"
 echo     ^<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" /^>>>                                            "%MF%"
-echo     ^<application android:label="%APP_NAME%" android:icon="@mipmap/ic_launcher" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"^>>> "%MF%"
+echo     ^<application android:label="%APP_NAME%" android:icon="@mipmap/ic_launcher" android:usesCleartextTraffic="true" android:theme="@style/AppTheme"^>>> "%MF%"
 echo         ^<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713"/^>>>  "%MF%"
 echo         ^<activity android:name=".MainActivity" android:configChanges="orientation|screenSize" android:hardwareAccelerated="true" android:exported="true"^>>> "%MF%"
 echo             ^<intent-filter^>>>                                                                                                "%MF%"
@@ -118,6 +118,16 @@ echo ^<?xml version="1.0" encoding="utf-8"?^>>                                  
 echo ^<resources^>>>                                                                               "%ST%"
 echo     ^<string name="app_name"^>%APP_NAME%^</string^>>>                                        "%ST%"
 echo ^</resources^>>>                                                                              "%ST%"
+
+REM ── res/values/styles.xml ──────────────────────────────────
+set SY=android\app\src\main\res\values\styles.xml
+echo ^<?xml version="1.0" encoding="utf-8"?^>>                                                    "%SY%"
+echo ^<resources^>>>                                                                               "%SY%"
+echo     ^<style name="AppTheme" parent="Theme.AppCompat.NoActionBar"^>>>                         "%SY%"
+echo         ^<item name="android:windowFullscreen"^>true^</item^>>>                              "%SY%"
+echo         ^<item name="android:windowContentOverlay"^>@null^</item^>>>                         "%SY%"
+echo     ^</style^>>>                                                                              "%SY%"
+echo ^</resources^>>>                                                                              "%SY%"
 
 REM ── app/build.gradle ───────────────────────────────────────
 set ABG=android\app\build.gradle

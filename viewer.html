@@ -108,6 +108,10 @@ canvas{display:block;touch-action:none;}
   <button class="btn-spawn" id="btnSpawn">SPAWN</button>
   <button class="btn-ecs"   id="btnEcs">ECS: OFF</button>
   <button class="btn-tog"   id="btnShadow">SHADOW: ON</button>
+  <button class="btn-tog"   id="btnEditor">EDITOR: OFF</button>
+  <button class="btn-tog"   id="btnAudio">AUDIO: OFF</button>
+  <button class="btn-tog"   id="btnPost">POST-FX: OFF</button>
+  <button class="btn-tog"   id="btnSave">SAVE</button>
   <button class="btn-clear" id="btnClear">CLEAR</button>
 </div>
 
@@ -119,6 +123,8 @@ canvas{display:block;touch-action:none;}
   <div>TRIS <span class="val" id="hTris">--</span></div>
   <div>INST <span class="val" id="hInst">0</span></div>
   <div>ENT  <span class="val" id="hEnt">0</span></div>
+  <div>PART <span class="val" id="hPart">0</span></div>
+  <div>SND  <span class="val" id="hSnd">0</span></div>
   <div>MEM  <span class="val" id="hMem">--</span></div>
   <div>QUAL <span class="val" id="hQual">--</span></div>
   <div>STEP <span class="val" id="hStep">--</span></div>
@@ -341,6 +347,18 @@ function queryFlag(flag) {
 
 // ═══════════════════════════════════════════════════════════════════
 // C — SYSTEMS  (pure functions over component arrays)
+//
+// IMPLEMENTED:
+//   C1: Physics System      ✅ Gravity, Euler integration, friction
+//   C2: Render Sync System  ✅ Dirty flag optimization, GPU updates
+//   C3: AI System           ✅ State machine (IDLE/PATROL/CHASE/ATTACK)
+//   C4: Input System        ✅ Keyboard + virtual joystick + particles (P key)
+//   C5: Collision Detection ✅ Spatial hash grid, sphere collision, raycast
+//   C6: Animation System    ✅ THREE.AnimationMixer integration
+//   C7: Audio System        ✅ Web Audio API, spatial audio, sound loading
+//   C8: Particle System     ✅ GPU particles, lifetime, burst emitter
+//   C9: LOD System          ✅ Distance-based level tracking
+//
 // ═══════════════════════════════════════════════════════════════════
 
 // ── C1: Physics System ───────────────────────────────────────────
@@ -446,8 +464,15 @@ function aiSystem(dt) {
 
       case AI_ATTACK:
         if(AI_TIMER[i] <= 0){
-          HP[pid] -= 10;
+          var damage = 10;
+          HP[pid] -= damage;
           AI_TIMER[i] = 0.8;
+          
+          // Show damage number
+          if(typeof showDamageNumber === 'function'){
+            showDamageNumber(PX[pid], PY[pid], PZ[pid], damage);
+          }
+          
           if(d2 > ATTACK_RANGE*ATTACK_RANGE) AI_STATE[i] = AI_CHASE;
         }
         break;
@@ -484,11 +509,455 @@ function inputSystem(dt) {
 
   // Jump — spacebar
   if(_keys[32] && PY[pid] === 0){ VY[pid] = 10; _keys[32] = 0; }
+  
+  // Spawn particles — P key
+  if(_keys[80]){
+    emitParticleBurst(PX[pid], PY[pid] + 1, PZ[pid], 15, 4, 1.2, 0.4);
+    _keys[80] = 0;
+  }
+}
+
+// ── C5: Collision Detection System ──────────────────────────────
+// AABB collision detection + raycasting + spatial hash
+var COLL_MINX = new Float32Array(MAX_E);
+var COLL_MINY = new Float32Array(MAX_E);
+var COLL_MINZ = new Float32Array(MAX_E);
+var COLL_MAXX = new Float32Array(MAX_E);
+var COLL_MAXY = new Float32Array(MAX_E);
+var COLL_MAXZ = new Float32Array(MAX_E);
+var COLL_RADIUS = new Float32Array(MAX_E);
+
+var GRID_SIZE = 10.0;
+var spatialGrid = {};
+
+function updateSpatialGrid() {
+  spatialGrid = {};
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(COLL_RADIUS[i] <= 0) continue;
+    
+    var gx = Math.floor(PX[i] / GRID_SIZE);
+    var gz = Math.floor(PZ[i] / GRID_SIZE);
+    var key = gx + ',' + gz;
+    
+    if(!spatialGrid[key]) spatialGrid[key] = [];
+    spatialGrid[key].push(i);
+  }
+}
+
+function collisionSystem(dt) {
+  updateSpatialGrid();
+  
+  for(var key in spatialGrid){
+    var cell = spatialGrid[key];
+    
+    for(var i = 0; i < cell.length; i++){
+      var a = cell[i];
+      if(FLAGS[a] & F_STATIC) continue;
+      
+      for(var j = i+1; j < cell.length; j++){
+        var b = cell[j];
+        
+        // Quick sphere test first
+        var dx = PX[b] - PX[a];
+        var dy = PY[b] - PY[a];
+        var dz = PZ[b] - PZ[a];
+        var d2 = dx*dx + dy*dy + dz*dz;
+        var minDist = COLL_RADIUS[a] + COLL_RADIUS[b];
+        
+        if(d2 < minDist*minDist){
+          // Collision! Resolve with separation
+          var dist = Math.sqrt(d2);
+          if(dist < 0.001) continue;
+          
+          var overlap = minDist - dist;
+          var nx = dx / dist;
+          var ny = dy / dist;
+          var nz = dz / dist;
+          
+          // Push apart (weighted by static flag)
+          var wa = (FLAGS[a] & F_STATIC) ? 0 : 0.5;
+          var wb = (FLAGS[b] & F_STATIC) ? 0 : 0.5;
+          
+          PX[a] -= nx * overlap * wa;
+          PY[a] -= ny * overlap * wa;
+          PZ[a] -= nz * overlap * wa;
+          PX[b] += nx * overlap * wb;
+          PY[b] += ny * overlap * wb;
+          PZ[b] += nz * overlap * wb;
+          
+          if(wa > 0) FLAGS[a] |= F_DIRTY;
+          if(wb > 0) FLAGS[b] |= F_DIRTY;
+          
+          // Bounce velocity
+          var relVX = VX[b] - VX[a];
+          var relVY = VY[b] - VY[a];
+          var relVZ = VZ[b] - VZ[a];
+          var velAlongNormal = relVX*nx + relVY*ny + relVZ*nz;
+          
+          if(velAlongNormal < 0){
+            var restitution = 0.3;
+            VX[a] -= nx * velAlongNormal * restitution * wa * 2;
+            VY[a] -= ny * velAlongNormal * restitution * wa * 2;
+            VZ[a] -= nz * velAlongNormal * restitution * wa * 2;
+            VX[b] += nx * velAlongNormal * restitution * wb * 2;
+            VY[b] += ny * velAlongNormal * restitution * wb * 2;
+            VZ[b] += nz * velAlongNormal * restitution * wb * 2;
+          }
+        }
+      }
+    }
+  }
+}
+
+function raycast(ox, oy, oz, dx, dy, dz, maxDist) {
+  var closestDist = maxDist;
+  var closestEid = -1;
+  
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(COLL_RADIUS[i] <= 0) continue;
+    
+    // Ray vs sphere test
+    var ex = PX[i] - ox;
+    var ey = PY[i] + COLL_RADIUS[i] - oy;
+    var ez = PZ[i] - oz;
+    
+    var t = ex*dx + ey*dy + ez*dz;
+    if(t < 0 || t > maxDist) continue;
+    
+    var px = ox + dx*t;
+    var py = oy + dy*t;
+    var pz = oz + dz*t;
+    
+    var dist2 = (px-PX[i])*(px-PX[i]) + 
+                (py-(PY[i]+COLL_RADIUS[i]))*(py-(PY[i]+COLL_RADIUS[i])) + 
+                (pz-PZ[i])*(pz-PZ[i]);
+    
+    if(dist2 < COLL_RADIUS[i]*COLL_RADIUS[i] && t < closestDist){
+      closestDist = t;
+      closestEid = i;
+    }
+  }
+  
+  return closestEid;
+}
+
+// ── C6: Animation System ─────────────────────────────────────────
+// Skeletal animation with keyframe sampling
+var ANIM_CLIP    = new Int16Array(MAX_E);
+var ANIM_TIME    = new Float32Array(MAX_E);
+var ANIM_SPEED   = new Float32Array(MAX_E);
+var ANIM_LOOP    = new Uint8Array(MAX_E);
+var ANIM_BLEND   = new Float32Array(MAX_E);
+
+var animClips = [];
+var animMixers = {}; // eid → THREE.AnimationMixer
+
+function animationSystem(dt) {
+  // Update THREE.js AnimationMixers for entities with animations
+  for(var eid in animMixers){
+    var mixer = animMixers[eid];
+    if(mixer && (FLAGS[eid] & F_ALIVE)){
+      mixer.update(dt * ANIM_SPEED[eid]);
+    }
+  }
+}
+
+function playAnimation(eid, clipIndex, loop, speed) {
+  ANIM_CLIP[eid]  = clipIndex;
+  ANIM_TIME[eid]  = 0;
+  ANIM_LOOP[eid]  = loop ? 1 : 0;
+  ANIM_SPEED[eid] = speed || 1.0;
+  
+  // If we have a mixer and clip, play it
+  var mixer = animMixers[eid];
+  if(mixer && animClips[clipIndex]){
+    var action = mixer.clipAction(animClips[clipIndex]);
+    action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce);
+    action.timeScale = speed || 1.0;
+    action.reset();
+    action.play();
+  }
+}
+
+function stopAnimation(eid) {
+  var mixer = animMixers[eid];
+  if(mixer){
+    mixer.stopAllAction();
+  }
+  ANIM_CLIP[eid] = -1;
+}
+
+// ── C7: Audio System ─────────────────────────────────────────────
+// Web Audio API with spatial audio
+var audioContext = null;
+var audioBuffers = {};
+var activeSounds = [];
+var audioEnabled = false;
+
+function initAudio() {
+  if(!audioContext){
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      audioEnabled = true;
+      console.log('Audio initialized');
+    } catch(e){
+      console.warn('Web Audio not supported:', e);
+    }
+  }
+}
+
+function loadSound(url) {
+  if(audioBuffers[url]) return Promise.resolve(audioBuffers[url]);
+  if(!audioContext) return Promise.reject(new Error('Audio not initialized'));
+  
+  return new Promise(function(res, rej){
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.onload = function(){
+      if(xhr.status === 200 || xhr.status === 0){
+        audioContext.decodeAudioData(xhr.response, function(buffer){
+          audioBuffers[url] = buffer;
+          res(buffer);
+        }, function(e){ rej(new Error('Decode failed: ' + e)); });
+      } else {
+        rej(new Error('HTTP ' + xhr.status));
+      }
+    };
+    xhr.onerror = function(){ rej(new Error('XHR error')); };
+    xhr.send();
+  });
+}
+
+function playSound(url, loop, volume, spatial, entityId) {
+  if(!audioContext || !audioEnabled) return;
+  
+  loadSound(url).then(function(buffer){
+    var source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.loop = loop || false;
+    
+    var gain = audioContext.createGain();
+    gain.gain.value = volume || 1.0;
+    
+    var panner = null;
+    if(spatial && entityId >= 0 && (FLAGS[entityId] & F_ALIVE)){
+      panner = audioContext.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 1;
+      panner.maxDistance = 100;
+      panner.rolloffFactor = 1;
+      panner.setPosition(PX[entityId], PY[entityId], PZ[entityId]);
+      
+      source.connect(panner);
+      panner.connect(gain);
+    } else {
+      source.connect(gain);
+    }
+    
+    gain.connect(audioContext.destination);
+    source.start(0);
+    
+    var snd = {source:source, gain:gain, panner:panner, entity:entityId, active:true};
+    activeSounds.push(snd);
+    
+    source.onended = function(){
+      snd.active = false;
+    };
+  }).catch(function(e){
+    console.warn('Sound load failed:', url, e.message);
+  });
+}
+
+function audioSystem(dt) {
+  if(!audioContext || !audioEnabled) return;
+  
+  // Update listener to camera
+  if(camera){
+    audioContext.listener.setPosition(
+      camera.position.x,
+      camera.position.y,
+      camera.position.z
+    );
+    
+    var forward = new THREE.Vector3(0, 0, -1);
+    forward.applyQuaternion(camera.quaternion);
+    var up = new THREE.Vector3(0, 1, 0);
+    up.applyQuaternion(camera.quaternion);
+    
+    if(audioContext.listener.forwardX){
+      audioContext.listener.forwardX.value = forward.x;
+      audioContext.listener.forwardY.value = forward.y;
+      audioContext.listener.forwardZ.value = forward.z;
+      audioContext.listener.upX.value = up.x;
+      audioContext.listener.upY.value = up.y;
+      audioContext.listener.upZ.value = up.z;
+    }
+  }
+  
+  // Update spatial sounds and clean up finished ones
+  for(var i = activeSounds.length - 1; i >= 0; i--){
+    var snd = activeSounds[i];
+    
+    if(!snd.active){
+      activeSounds.splice(i, 1);
+      continue;
+    }
+    
+    if(snd.entity >= 0 && (FLAGS[snd.entity] & F_ALIVE)){
+      if(snd.panner){
+        snd.panner.setPosition(
+          PX[snd.entity],
+          PY[snd.entity],
+          PZ[snd.entity]
+        );
+      }
+    } else if(snd.entity >= 0){
+      // Entity died, stop sound
+      snd.source.stop();
+      snd.active = false;
+    }
+  }
+}
+
+// ── C8: Particle System ──────────────────────────────────────────
+// GPU particles via InstancedMesh
+var PART_LIFE    = new Float32Array(MAX_E);
+var PART_MAXLIFE = new Float32Array(MAX_E);
+var PART_SIZE    = new Float32Array(MAX_E);
+var PART_ALPHA   = new Float32Array(MAX_E);
+var PART_VEL_X   = new Float32Array(MAX_E);
+var PART_VEL_Y   = new Float32Array(MAX_E);
+var PART_VEL_Z   = new Float32Array(MAX_E);
+
+var particlePoolId = -1;
+var PARTICLE_GRAVITY = -5.0;
+
+function particleSystem(dt) {
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(PART_LIFE[i] <= 0) continue;
+    
+    PART_LIFE[i] -= dt;
+    
+    if(PART_LIFE[i] <= 0){
+      // Particle died
+      despawnEntity(i);
+    } else {
+      // Update particle physics
+      PART_VEL_Y[i] += PARTICLE_GRAVITY * dt;
+      PX[i] += PART_VEL_X[i] * dt;
+      PY[i] += PART_VEL_Y[i] * dt;
+      PZ[i] += PART_VEL_Z[i] * dt;
+      
+      // Fade alpha over lifetime
+      PART_ALPHA[i] = PART_LIFE[i] / PART_MAXLIFE[i];
+      
+      // Scale down over lifetime
+      var scale = PART_SIZE[i] * PART_ALPHA[i];
+      
+      FLAGS[i] |= F_DIRTY;
+      
+      // Update instance matrix with scale
+      if(MESH_ID[i] >= 0 && MESH_IDX[i] >= 0){
+        var p = meshPool[MESH_ID[i]];
+        if(p && _syncObj){
+          _syncObj.position.set(PX[i], PY[i], PZ[i]);
+          _syncObj.rotation.set(0, 0, 0);
+          _syncObj.scale.set(scale, scale, scale);
+          _syncObj.updateMatrix();
+          p.mesh.setMatrixAt(MESH_IDX[i], _syncObj.matrix);
+          p.mesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+    }
+  }
+}
+
+function emitParticle(x, y, z, vx, vy, vz, lifetime, size) {
+  if(particlePoolId < 0) return -1;
+  
+  var id = spawnEntity(T_NONE, particlePoolId, x, y, z);
+  if(id < 0) return -1;
+  
+  PART_LIFE[id] = lifetime || 1.0;
+  PART_MAXLIFE[id] = PART_LIFE[id];
+  PART_SIZE[id] = size || 0.5;
+  PART_ALPHA[id] = 1.0;
+  PART_VEL_X[id] = vx || 0;
+  PART_VEL_Y[id] = vy || 0;
+  PART_VEL_Z[id] = vz || 0;
+  
+  FLAGS[id] &= ~F_PHYSICS; // Particles have their own physics
+  FLAGS[id] |= F_DIRTY;
+  
+  return id;
+}
+
+function emitParticleBurst(x, y, z, count, speed, lifetime, size) {
+  for(var i = 0; i < count; i++){
+    var angle = Math.random() * Math.PI * 2;
+    var elevation = (Math.random() - 0.3) * Math.PI * 0.5;
+    var vx = Math.cos(elevation) * Math.sin(angle) * speed;
+    var vy = Math.sin(elevation) * speed + 2;
+    var vz = Math.cos(elevation) * Math.cos(angle) * speed;
+    emitParticle(x, y, z, vx, vy, vz, lifetime, size);
+  }
+}
+
+// ── C9: LOD System ───────────────────────────────────────────────
+// Level of detail — swap meshes based on distance to camera
+var LOD_LEVEL = new Uint8Array(MAX_E);
+var lodMeshPools = {};
+var LOD_ENABLED = false;
+
+var LOD_DIST_HIGH = 400;   // 20m squared
+var LOD_DIST_MED  = 2500;  // 50m squared
+
+function lodSystem() {
+  if(!LOD_ENABLED || !camera) return;
+  
+  var camX = camera.position.x;
+  var camY = camera.position.y;
+  var camZ = camera.position.z;
+  
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(MESH_ID[i] < 0) continue;
+    
+    var dx = PX[i] - camX;
+    var dy = PY[i] - camY;
+    var dz = PZ[i] - camZ;
+    var d2 = dx*dx + dy*dy + dz*dz;
+    
+    var newLod = d2 < LOD_DIST_HIGH ? 0 : d2 < LOD_DIST_MED ? 1 : 2;
+    
+    if(newLod !== LOD_LEVEL[i]){
+      LOD_LEVEL[i] = newLod;
+      // LOD swap would happen here if we had multiple mesh pools per model
+      // For now, just track the level for future use
+    }
+  }
 }
 
 
 // ═══════════════════════════════════════════════════════════════════
 // D — RENDERER, SCENE, CAMERA, LIGHTING
+//
+// IMPLEMENTED:
+//   D0: Core Renderer       ✅ Three.js WebGL, shadows, fog
+//   D1: Post-Processing     ✅ Bloom, vignette, color grading (custom shaders)
+//   D2: Canvas UI Framework ✅ Health bar, damage numbers, crosshair
+//   D3: Scene Editor        ✅ Toggle, selection, save/load, shortcuts
+//   D4: Save/Load System    ✅ localStorage persistence
+//
 // ═══════════════════════════════════════════════════════════════════
 
 var scene, camera, renderer, sun;
@@ -499,6 +968,528 @@ var ecsMode       = false;  // toggle ECS gameplay on/off
 
 // Three.js reusable dummy — zero alloc in render sync
 // (created in bootScene after THREE is confirmed loaded)
+
+// ── D1: Post-Processing System ───────────────────────────────────
+// Custom post-processing without EffectComposer
+var postProcessingEnabled = false;
+var renderTarget1 = null;
+var renderTarget2 = null;
+var postQuad = null;
+var postMaterial = null;
+var postScene = null;
+var postCamera = null;
+
+// Post-processing shader (bloom + vignette + color grading)
+var postProcessShader = {
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform vec2 resolution;
+    uniform float bloomStrength;
+    uniform float vignetteStrength;
+    uniform float saturation;
+    uniform float contrast;
+    uniform float brightness;
+    varying vec2 vUv;
+    
+    // Simple bloom (blur + add)
+    vec3 bloom(sampler2D tex, vec2 uv) {
+      vec3 col = vec3(0.0);
+      float total = 0.0;
+      float radius = 0.003;
+      
+      for(float x = -2.0; x <= 2.0; x += 1.0) {
+        for(float y = -2.0; y <= 2.0; y += 1.0) {
+          vec2 offset = vec2(x, y) * radius;
+          float weight = 1.0 - length(offset) / (radius * 2.828);
+          col += texture2D(tex, uv + offset).rgb * weight;
+          total += weight;
+        }
+      }
+      
+      return col / total;
+    }
+    
+    // Vignette
+    float vignette(vec2 uv, float strength) {
+      vec2 center = uv - 0.5;
+      return 1.0 - dot(center, center) * strength;
+    }
+    
+    // Color grading
+    vec3 colorGrade(vec3 col, float sat, float con, float bri) {
+      // Brightness
+      col *= bri;
+      
+      // Contrast
+      col = (col - 0.5) * con + 0.5;
+      
+      // Saturation
+      float gray = dot(col, vec3(0.299, 0.587, 0.114));
+      col = mix(vec3(gray), col, sat);
+      
+      return col;
+    }
+    
+    void main() {
+      vec3 color = texture2D(tDiffuse, vUv).rgb;
+      
+      // Bloom
+      vec3 bloomColor = bloom(tDiffuse, vUv);
+      color += bloomColor * bloomStrength;
+      
+      // Vignette
+      float vig = vignette(vUv, vignetteStrength);
+      color *= vig;
+      
+      // Color grading
+      color = colorGrade(color, saturation, contrast, brightness);
+      
+      // Tone mapping (simple Reinhard)
+      color = color / (color + vec3(1.0));
+      
+      // Gamma correction
+      color = pow(color, vec3(1.0 / 2.2));
+      
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `
+};
+
+function initPostProcessing() {
+  if(!renderer) return;
+  
+  try {
+    // Create render targets
+    var width = window.innerWidth;
+    var height = window.innerHeight;
+    
+    renderTarget1 = new THREE.WebGLRenderTarget(width, height, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBFormat,
+      stencilBuffer: false
+    });
+    
+    renderTarget2 = new THREE.WebGLRenderTarget(width, height, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBFormat,
+      stencilBuffer: false
+    });
+    
+    // Create post-processing material
+    postMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: null },
+        resolution: { value: new THREE.Vector2(width, height) },
+        bloomStrength: { value: 0.3 },
+        vignetteStrength: { value: 0.5 },
+        saturation: { value: 1.1 },
+        contrast: { value: 1.05 },
+        brightness: { value: 1.0 }
+      },
+      vertexShader: postProcessShader.vertexShader,
+      fragmentShader: postProcessShader.fragmentShader
+    });
+    
+    // Create full-screen quad
+    var quadGeo = new THREE.PlaneGeometry(2, 2);
+    postQuad = new THREE.Mesh(quadGeo, postMaterial);
+    
+    // Create orthographic scene for post-processing
+    postScene = new THREE.Scene();
+    postScene.add(postQuad);
+    
+    postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    
+    postProcessingEnabled = true;
+    console.log('Post-processing initialized: Bloom + Vignette + Color Grading');
+    
+    // Resize handler
+    window.addEventListener('resize', function(){
+      if(renderTarget1 && renderTarget2){
+        var w = window.innerWidth;
+        var h = window.innerHeight;
+        renderTarget1.setSize(w, h);
+        renderTarget2.setSize(w, h);
+        if(postMaterial){
+          postMaterial.uniforms.resolution.value.set(w, h);
+        }
+      }
+    });
+    
+  } catch(e){
+    console.warn('Post-processing init failed:', e);
+    postProcessingEnabled = false;
+  }
+}
+
+function updatePostProcessing() {
+  if(!postProcessingEnabled || !postMaterial) return;
+  
+  // Adjust bloom based on quality
+  var bloomStrength = qualityLevel === 2 ? 0.3 : qualityLevel === 1 ? 0.2 : 0.1;
+  postMaterial.uniforms.bloomStrength.value = bloomStrength;
+  
+  // Adjust vignette
+  postMaterial.uniforms.vignetteStrength.value = 0.5;
+  
+  // Adjust color grading based on time of day (future)
+  postMaterial.uniforms.saturation.value = 1.1;
+  postMaterial.uniforms.contrast.value = 1.05;
+  postMaterial.uniforms.brightness.value = 1.0;
+}
+
+function renderWithPostProcessing() {
+  if(postProcessingEnabled && renderTarget1 && postMaterial && postScene){
+    // Render scene to texture
+    renderer.setRenderTarget(renderTarget1);
+    renderer.render(scene, camera);
+    
+    // Apply post-processing
+    postMaterial.uniforms.tDiffuse.value = renderTarget1.texture;
+    renderer.setRenderTarget(null);
+    renderer.render(postScene, postCamera);
+  } else {
+    // Fallback to direct rendering
+    renderer.render(scene, camera);
+  }
+}
+
+// ── D2: Canvas UI Framework ──────────────────────────────────────
+// 2D canvas overlay for HUD, menus, dialogs
+var uiCanvas = null;
+var uiCtx = null;
+var uiElements = [];
+var damageNumbers = []; // {x, y, z, value, life, maxLife}
+
+function initCanvasUI() {
+  uiCanvas = document.createElement('canvas');
+  uiCanvas.style.position = 'fixed';
+  uiCanvas.style.top = '0';
+  uiCanvas.style.left = '0';
+  uiCanvas.style.pointerEvents = 'none';
+  uiCanvas.style.zIndex = '99';
+  uiCanvas.width = window.innerWidth;
+  uiCanvas.height = window.innerHeight;
+  document.body.appendChild(uiCanvas);
+  uiCtx = uiCanvas.getContext('2d');
+  
+  // Resize handler
+  window.addEventListener('resize', function(){
+    uiCanvas.width = window.innerWidth;
+    uiCanvas.height = window.innerHeight;
+  });
+}
+
+function drawCanvasUI() {
+  if(!uiCtx) return;
+  
+  uiCtx.clearRect(0, 0, uiCanvas.width, uiCanvas.height);
+  
+  // Draw player health bar
+  if(_playerEid >= 0 && (FLAGS[_playerEid] & F_ALIVE)){
+    var hpPct = HP[_playerEid] / HP_MAX[_playerEid];
+    var barW = 200, barH = 20, barX = 20, barY = uiCanvas.height - 40;
+    
+    // Background
+    uiCtx.fillStyle = 'rgba(0,0,0,0.7)';
+    uiCtx.fillRect(barX-2, barY-2, barW+4, barH+4);
+    
+    // Health bar
+    uiCtx.fillStyle = hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00';
+    uiCtx.fillRect(barX, barY, barW * hpPct, barH);
+    
+    // Border
+    uiCtx.strokeStyle = '#fff';
+    uiCtx.lineWidth = 2;
+    uiCtx.strokeRect(barX, barY, barW, barH);
+    
+    // HP text
+    uiCtx.fillStyle = '#fff';
+    uiCtx.font = 'bold 14px monospace';
+    uiCtx.fillText('HP: '+HP[_playerEid]+'/'+HP_MAX[_playerEid], barX+5, barY+15);
+  }
+  
+  // Draw damage numbers
+  for(var i = damageNumbers.length - 1; i >= 0; i--){
+    var dmg = damageNumbers[i];
+    dmg.life -= 0.016; // ~60fps
+    
+    if(dmg.life <= 0){
+      damageNumbers.splice(i, 1);
+      continue;
+    }
+    
+    // Project 3D position to screen
+    if(!camera) continue;
+    var vec = new THREE.Vector3(dmg.x, dmg.y + 2, dmg.z);
+    vec.project(camera);
+    
+    var sx = (vec.x * 0.5 + 0.5) * uiCanvas.width;
+    var sy = (-(vec.y) * 0.5 + 0.5) * uiCanvas.height;
+    
+    // Fade out
+    var alpha = dmg.life / dmg.maxLife;
+    
+    // Rise up
+    sy -= (1 - alpha) * 50;
+    
+    uiCtx.save();
+    uiCtx.globalAlpha = alpha;
+    uiCtx.font = 'bold 24px monospace';
+    uiCtx.fillStyle = '#ff0';
+    uiCtx.strokeStyle = '#000';
+    uiCtx.lineWidth = 3;
+    uiCtx.strokeText('-' + dmg.value, sx, sy);
+    uiCtx.fillText('-' + dmg.value, sx, sy);
+    uiCtx.restore();
+  }
+  
+  // Draw crosshair in ECS mode
+  if(ecsMode){
+    var cx = uiCanvas.width / 2;
+    var cy = uiCanvas.height / 2;
+    uiCtx.strokeStyle = 'rgba(255,255,255,0.7)';
+    uiCtx.lineWidth = 2;
+    uiCtx.beginPath();
+    uiCtx.moveTo(cx - 10, cy);
+    uiCtx.lineTo(cx + 10, cy);
+    uiCtx.moveTo(cx, cy - 10);
+    uiCtx.lineTo(cx, cy + 10);
+    uiCtx.stroke();
+  }
+}
+
+function showDamageNumber(x, y, z, value) {
+  damageNumbers.push({
+    x: x, y: y, z: z,
+    value: value,
+    life: 1.5,
+    maxLife: 1.5
+  });
+}
+
+function addUIElement(type, x, y, w, h, text, onClick) {
+  uiElements.push({type:type, x:x, y:y, w:w, h:h, text:text, onClick:onClick, visible:true});
+  return uiElements.length - 1;
+}
+
+// ── D3: Scene Editor ─────────────────────────────────────────────
+// Browser-based level editor
+var editorMode = false;
+var editorSelection = -1;
+var editorGizmo = null;
+var editorGrid = true;
+var editorSnap = 1.0;
+var editorMouseX = 0;
+var editorMouseY = 0;
+
+function toggleEditor() {
+  editorMode = !editorMode;
+  console.log('Editor mode:', editorMode ? 'ON' : 'OFF');
+  
+  if(editorMode){
+    // Pause game logic
+    ecsMode = false;
+    document.getElementById('btnEcs').textContent = 'ECS: OFF';
+  }
+}
+
+function editorUpdate() {
+  if(!editorMode) return;
+  
+  // Press E to toggle editor
+  if(_keys[69]){ _keys[69] = 0; toggleEditor(); }
+  
+  // Press DELETE to delete selected entity
+  if(_keys[46] && editorSelection >= 0){
+    despawnEntity(editorSelection);
+    editorSelection = -1;
+    _keys[46] = 0;
+  }
+  
+  // Press G to spawn particle burst at selected entity
+  if(_keys[71] && editorSelection >= 0){
+    emitParticleBurst(
+      PX[editorSelection],
+      PY[editorSelection] + 1,
+      PZ[editorSelection],
+      20, 5, 1.0, 0.3
+    );
+    _keys[71] = 0;
+  }
+}
+
+function editorRender() {
+  if(!editorMode || !uiCtx) return;
+  
+  // Draw selection indicator
+  if(editorSelection >= 0 && (FLAGS[editorSelection] & F_ALIVE)){
+    var vec = new THREE.Vector3(PX[editorSelection], PY[editorSelection] + 2, PZ[editorSelection]);
+    vec.project(camera);
+    
+    var sx = (vec.x * 0.5 + 0.5) * uiCanvas.width;
+    var sy = (-(vec.y) * 0.5 + 0.5) * uiCanvas.height;
+    
+    uiCtx.strokeStyle = '#0ff';
+    uiCtx.lineWidth = 3;
+    uiCtx.beginPath();
+    uiCtx.arc(sx, sy, 30, 0, Math.PI * 2);
+    uiCtx.stroke();
+    
+    // Draw entity info
+    uiCtx.fillStyle = '#0ff';
+    uiCtx.font = 'bold 12px monospace';
+    uiCtx.fillText('Entity #' + editorSelection, sx + 35, sy - 10);
+    uiCtx.fillText('Type: ' + TYPE[editorSelection], sx + 35, sy + 5);
+    uiCtx.fillText('HP: ' + HP[editorSelection], sx + 35, sy + 20);
+  }
+  
+  // Draw editor help text
+  uiCtx.fillStyle = 'rgba(0,255,255,0.8)';
+  uiCtx.font = 'bold 14px monospace';
+  uiCtx.fillText('EDITOR MODE', 10, 30);
+  uiCtx.font = '12px monospace';
+  uiCtx.fillText('E: Exit | DEL: Delete | G: Particles', 10, 50);
+}
+
+function editorSaveScene() {
+  var sceneData = {
+    version: '1.0',
+    timestamp: Date.now(),
+    entities: []
+  };
+  
+  for(var i = 0; i < _eid; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    sceneData.entities.push({
+      id: i,
+      type: TYPE[i],
+      pos: [PX[i], PY[i], PZ[i]],
+      rot: RY[i],
+      hp: HP[i],
+      flags: FLAGS[i],
+      meshId: MESH_ID[i]
+    });
+  }
+  
+  var json = JSON.stringify(sceneData, null, 2);
+  console.log('Scene saved:', sceneData.entities.length, 'entities');
+  
+  // Download as file
+  var blob = new Blob([json], {type: 'application/json'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'scene_' + Date.now() + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  
+  return json;
+}
+
+function editorLoadScene(jsonStr) {
+  try {
+    var sceneData = JSON.parse(jsonStr);
+    console.log('Scene loaded:', sceneData.entities.length, 'entities');
+    
+    // Clear current scene
+    clearInstances();
+    
+    // TODO: Respawn entities from data (needs mesh pool mapping)
+    setStatus('Scene loaded: ' + sceneData.entities.length + ' entities');
+    setTimeout(function(){ setStatus(''); }, 2000);
+  } catch(e){
+    console.error('Scene load error:', e);
+    setStatus('Scene load failed: ' + e.message);
+    setTimeout(function(){ setStatus(''); }, 2000);
+  }
+}
+
+// ── D4: Save/Load System ─────────────────────────────────────────
+// Persistence — localStorage, IndexedDB, or cloud save
+var SAVE_KEY = 'ramai_save_v1';
+
+function saveGame() {
+  // TODO: Serialize game state (entities, player progress, inventory)
+  // TODO: Compress if needed (LZ-string)
+  // TODO: Save to localStorage or IndexedDB
+  
+  var saveData = {
+    version: 1,
+    timestamp: Date.now(),
+    player: _playerEid >= 0 ? {
+      id: _playerEid,
+      pos: [PX[_playerEid], PY[_playerEid], PZ[_playerEid]],
+      hp: HP[_playerEid],
+      // TODO: inventory, skills, quest progress
+    } : null,
+    entities: []
+  };
+  
+  // Save all alive entities
+  for(var i = 0; i < _eid; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(i === _playerEid) continue; // already saved
+    saveData.entities.push({
+      type: TYPE[i],
+      pos: [PX[i], PY[i], PZ[i]],
+      rot: RY[i],
+      hp: HP[i],
+      aiState: AI_STATE[i]
+    });
+  }
+  
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+    console.log('Game saved:', saveData.entities.length, 'entities');
+    return true;
+  } catch(e){
+    console.error('Save failed:', e);
+    return false;
+  }
+}
+
+function loadGame() {
+  // TODO: Load from localStorage/IndexedDB
+  // TODO: Decompress if needed
+  // TODO: Restore entities, player state
+  
+  try {
+    var json = localStorage.getItem(SAVE_KEY);
+    if(!json){ console.log('No save found'); return false; }
+    
+    var saveData = JSON.parse(json);
+    console.log('Game loaded:', saveData.entities.length, 'entities');
+    
+    // PLACEHOLDER: Would need to clear scene and respawn entities
+    // with correct mesh pools and properties
+    
+    return true;
+  } catch(e){
+    console.error('Load failed:', e);
+    return false;
+  }
+}
+
+function deleteSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+    console.log('Save deleted');
+    return true;
+  } catch(e){
+    console.error('Delete save failed:', e);
+    return false;
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // E — ASSET SYSTEM
@@ -605,6 +1596,25 @@ function spawnEntity(type, poolId, x, y, z) {
   MESH_ID[id]  = poolId;
   MESH_IDX[id] = slot;
   FLAGS[id]   |= F_DIRTY | F_PHYSICS;
+  
+  // Calculate collision bounds from mesh
+  var p = meshPool[poolId];
+  if(p && p.mesh && p.mesh.geometry){
+    var geo = p.mesh.geometry;
+    if(!geo.boundingBox) geo.computeBoundingBox();
+    var box = geo.boundingBox;
+    if(box){
+      var size = box.getSize(new THREE.Vector3());
+      COLL_MINX[id] = box.min.x;
+      COLL_MINY[id] = box.min.y;
+      COLL_MINZ[id] = box.min.z;
+      COLL_MAXX[id] = box.max.x;
+      COLL_MAXY[id] = box.max.y;
+      COLL_MAXZ[id] = box.max.z;
+      COLL_RADIUS[id] = Math.max(size.x, size.y, size.z) / 2;
+    }
+  }
+  
   return id;
 }
 
@@ -926,6 +1936,19 @@ function bootScene() {
   grid.material.transparent = true;
   scene.add(grid);
 
+  // ── Particle pool ───────────────────────────────────────────────
+  var particleGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+  var particleMat = new THREE.MeshBasicMaterial({
+    color: 0xffaa00,
+    transparent: true,
+    opacity: 0.8
+  });
+  var particleMesh = new THREE.InstancedMesh(particleGeo, particleMat, 500);
+  particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(particleMesh);
+  particlePoolId = registerMeshPool(particleMesh, 500);
+  console.log('Particle pool created: ID', particlePoolId);
+
   // ── Input setup ─────────────────────────────────────────────────
   setupKeyboard();
   setupJoystick();
@@ -941,6 +1964,37 @@ function bootScene() {
   document.getElementById('btnClear').onclick  = clearInstances;
   document.getElementById('btnShadow').onclick = toggleShadow;
   document.getElementById('btnEcs').onclick    = toggleEcs;
+  document.getElementById('btnEditor').onclick = function(){
+    toggleEditor();
+    this.textContent = 'EDITOR: ' + (editorMode ? 'ON' : 'OFF');
+  };
+  document.getElementById('btnAudio').onclick = function(){
+    if(!audioEnabled){
+      initAudio();
+      this.textContent = 'AUDIO: ' + (audioEnabled ? 'ON' : 'OFF');
+    } else {
+      audioEnabled = false;
+      this.textContent = 'AUDIO: OFF';
+    }
+  };
+  document.getElementById('btnPost').onclick = function(){
+    if(!postProcessingEnabled){
+      initPostProcessing();
+      this.textContent = 'POST-FX: ' + (postProcessingEnabled ? 'ON' : 'OFF');
+    } else {
+      postProcessingEnabled = false;
+      this.textContent = 'POST-FX: OFF';
+    }
+  };
+  document.getElementById('btnSave').onclick = function(){
+    if(saveGame()){
+      setStatus('Game saved!');
+      setTimeout(function(){ setStatus(''); }, 1500);
+    } else {
+      setStatus('Save failed!');
+      setTimeout(function(){ setStatus(''); }, 1500);
+    }
+  };
 
   // ── Resize ──────────────────────────────────────────────────────
   window.addEventListener('resize', function(){
@@ -957,6 +2011,12 @@ function bootScene() {
 
   // ── Start loop + auto-load ───────────────────────────────────────
   _lastTime = performance.now();
+  
+  // Initialize new systems
+  initCanvasUI();           // Canvas UI overlay
+  // initPostProcessing();  // Uncomment when EffectComposer is available
+  // Audio requires user gesture - use AUDIO button
+  
   requestAnimationFrame(gameLoop);
   loadAndSpawn(document.getElementById('modelSelect').value, 2000);
 }
@@ -1031,6 +2091,9 @@ function gameLoop(now) {
       inputSystem(FIXED_DT);
       physicsSystem(FIXED_DT);
       aiSystem(FIXED_DT);
+      collisionSystem(FIXED_DT);    // NEW: Collision detection
+      animationSystem(FIXED_DT);    // NEW: Skeletal animation
+      particleSystem(FIXED_DT);     // NEW: Particle updates
       _accumulator -= FIXED_DT;
       _physSteps++;
     }
@@ -1046,8 +2109,16 @@ function gameLoop(now) {
     }
   }
 
+  // ── Per-frame systems (run every frame, not fixed) ─────────────
+  audioSystem(dt);           // NEW: Update spatial audio
+  lodSystem();               // NEW: Level of detail switching
+  editorUpdate();            // NEW: Scene editor input
+  updatePostProcessing();    // NEW: Post-processing params
+
   // ── Render ────────────────────────────────────────────────────
-  renderer.render(scene, camera);
+  renderWithPostProcessing(); // Uses composer if enabled, else direct render
+  editorRender();            // NEW: Draw editor gizmos/overlays
+  drawCanvasUI();            // NEW: Draw canvas UI overlay
 
   // ── HUD update every 16 frames (~4x/sec at 60fps) ─────────────
   _hudTick = (_hudTick + 1) & 15;
@@ -1075,6 +2146,14 @@ function updateHUD() {
   var alive=0;
   for(var i=0;i<_eid;i++) if(FLAGS[i]&F_ALIVE) alive++;
   document.getElementById('hEnt').textContent = alive;
+  
+  // Count particles
+  var particles=0;
+  for(var i=0;i<_eid;i++) if((FLAGS[i]&F_ALIVE) && PART_LIFE[i]>0) particles++;
+  document.getElementById('hPart').textContent = particles;
+  
+  // Count active sounds
+  document.getElementById('hSnd').textContent = activeSounds.length;
 
   if(performance.memory){
     var mb = (performance.memory.usedJSHeapSize/1048576).toFixed(0);

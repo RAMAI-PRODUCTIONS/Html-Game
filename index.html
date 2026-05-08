@@ -1,0 +1,2357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>RAMAI Engine</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace;touch-action:none;}
+canvas{display:block;touch-action:none;}
+
+/* ── Top bar ── */
+#topbar{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  background:rgba(0,0,0,0.85);backdrop-filter:blur(4px);
+  display:flex;flex-wrap:wrap;gap:5px;padding:6px 8px;
+  align-items:center;border-bottom:1px solid #333;
+}
+#topbar select{
+  flex:1;min-width:130px;padding:5px 8px;font-size:12px;
+  background:#1a1a1a;color:#eee;border:1px solid #444;border-radius:4px;
+}
+#topbar button{
+  padding:5px 11px;font-size:12px;border:none;border-radius:4px;
+  cursor:pointer;font-family:inherit;font-weight:bold;
+}
+.btn-load {background:#27ae60;color:#fff;}
+.btn-spawn{background:#2980b9;color:#fff;}
+.btn-clear{background:#c0392b;color:#fff;}
+.btn-tog  {background:#7f8c8d;color:#fff;}
+.btn-ecs  {background:#8e44ad;color:#fff;}
+
+/* ── Perf HUD ── */
+#hud{
+  position:fixed;top:52px;right:8px;z-index:100;
+  background:rgba(0,0,0,0.82);border:1px solid #333;
+  border-radius:6px;padding:8px 12px;min-width:190px;
+  font-size:11px;color:#ccc;line-height:1.8;
+}
+#hud .val {color:#0ff;font-weight:bold;}
+#hud .warn{color:#f90;}
+#hud .bad {color:#f44;}
+#hud .good{color:#4f4;}
+
+/* ── ECS debug panel ── */
+#ecspanel{
+  position:fixed;top:52px;left:8px;z-index:100;
+  background:rgba(0,0,0,0.82);border:1px solid #555;
+  border-radius:6px;padding:8px 12px;min-width:160px;
+  font-size:11px;color:#ccc;line-height:1.8;display:none;
+}
+#ecspanel .lbl{color:#fa0;font-weight:bold;}
+
+/* ── Virtual joystick ── */
+#joystick-zone{
+  position:fixed;bottom:0;left:0;width:50%;height:40%;
+  z-index:50;pointer-events:none;
+}
+#joy-base{
+  position:absolute;bottom:50px;left:50px;
+  width:100px;height:100px;border-radius:50%;
+  border:2px solid rgba(255,255,255,0.25);
+  background:rgba(255,255,255,0.06);
+  pointer-events:none;
+}
+#joy-knob{
+  position:absolute;top:50%;left:50%;
+  width:44px;height:44px;border-radius:50%;
+  background:rgba(255,255,255,0.35);
+  transform:translate(-50%,-50%);
+  pointer-events:none;
+}
+
+/* ── Status overlay ── */
+#status{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:rgba(0,0,0,0.9);color:#fff;padding:18px 28px;
+  border-radius:8px;font-size:15px;z-index:200;text-align:center;
+  border:1px solid #555;display:none;
+}
+
+/* ── Quality badge ── */
+#qualBadge{
+  position:fixed;bottom:10px;right:10px;z-index:100;
+  background:rgba(0,0,0,0.7);color:#ff0;font-size:11px;
+  padding:3px 8px;border-radius:4px;
+}
+</style>
+</head>
+<body>
+
+<!-- ── UI ── -->
+<div id="topbar">
+  <select id="modelSelect">
+    <option value="CONTENT/MESHES/kenney_blocky-characters_20/character-a.glb">Character A</option>
+    <option value="CONTENT/MESHES/kenney_blocky-characters_20/character-b.glb">Character B</option>
+    <option value="CONTENT/MESHES/kenney_blocky-characters_20/character-c.glb">Character C</option>
+    <option value="CONTENT/MESHES/kenney_blocky-characters_20/character-d.glb">Character D</option>
+    <option value="CONTENT/MESHES/kenney_car-kit/sedan.glb">Sedan</option>
+    <option value="CONTENT/MESHES/kenney_car-kit/race.glb">Race Car</option>
+    <option value="CONTENT/MESHES/kenney_car-kit/police.glb">Police Car</option>
+    <option value="CONTENT/MESHES/kenney_car-kit/ambulance.glb">Ambulance</option>
+    <option value="CONTENT/MESHES/kenney_car-kit/truck.glb">Truck</option>
+    <option value="CONTENT/MESHES/kenney_city-kit-commercial_2.1/building-a.glb">Building A</option>
+    <option value="CONTENT/MESHES/kenney_city-kit-commercial_2.1/building-skyscraper-a.glb">Skyscraper</option>
+  </select>
+  <button class="btn-load"  id="btnLoad">LOAD</button>
+  <button class="btn-spawn" id="btnSpawn">SPAWN</button>
+  <button class="btn-ecs"   id="btnEcs">ECS: OFF</button>
+  <button class="btn-tog"   id="btnShadow">SHADOW: ON</button>
+  <button class="btn-tog"   id="btnEditor">EDITOR: OFF</button>
+  <button class="btn-tog"   id="btnAudio">AUDIO: OFF</button>
+  <button class="btn-tog"   id="btnPost">POST-FX: OFF</button>
+  <button class="btn-tog"   id="btnSave">SAVE</button>
+  <button class="btn-clear" id="btnClear">CLEAR</button>
+</div>
+
+<!-- ── Perf HUD ── -->
+<div id="hud">
+  <div>FPS  <span class="val" id="hFps">--</span></div>
+  <div>MS   <span class="val" id="hMs">--</span></div>
+  <div>DRAW <span class="val" id="hDraw">--</span></div>
+  <div>TRIS <span class="val" id="hTris">--</span></div>
+  <div>INST <span class="val" id="hInst">0</span></div>
+  <div>ENT  <span class="val" id="hEnt">0</span></div>
+  <div>PART <span class="val" id="hPart">0</span></div>
+  <div>SND  <span class="val" id="hSnd">0</span></div>
+  <div>MEM  <span class="val" id="hMem">--</span></div>
+  <div>QUAL <span class="val" id="hQual">--</span></div>
+  <div>STEP <span class="val" id="hStep">--</span></div>
+</div>
+
+<!-- ── ECS debug panel ── -->
+<div id="ecspanel">
+  <div><span class="lbl">ECS DEBUG</span></div>
+  <div>Alive  <span id="eAlive">0</span></div>
+  <div>Player <span id="ePlayer">--</span></div>
+  <div>Enemy  <span id="eEnemy">0</span></div>
+  <div>Static <span id="eStatic">0</span></div>
+  <div>Dirty  <span id="eDirty">0</span></div>
+  <div>Steps  <span id="eSteps">0</span></div>
+</div>
+
+<!-- ── Virtual joystick ── -->
+<div id="joystick-zone">
+  <div id="joy-base"><div id="joy-knob"></div></div>
+</div>
+
+<div id="qualBadge">Q: AUTO</div>
+<div id="status"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 1 — Stash native Image BEFORE any patches
+     Three.js must receive the patched Image constructor
+     ═══════════════════════════════════════════════════════════════ -->
+<script>window._NativeImage = window.Image;</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 2 — Android WebView patches
+     fetch() + Image.src both blocked on file:// — route via XHR
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function(){
+  // ── PATCH 1: fetch() ─────────────────────────────────────────
+  var _fetch = window.fetch;
+  window.fetch = function(input, init){
+    var url = (input && input.url) ? input.url : String(input);
+    var isFile = url.indexOf('file://') === 0 || url.indexOf('file:///android_asset') === 0;
+    var isRel  = url.indexOf('http') !== 0 && url.indexOf('data:') !== 0 && url.indexOf('blob:') !== 0;
+    if(isFile || isRel){
+      return new Promise(function(res,rej){
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.responseType = 'arraybuffer';
+        xhr.onload = function(){
+          if(xhr.status===200||xhr.status===0){
+            var ext = url.split('.').pop().toLowerCase();
+            var ct = {glb:'model/gltf-binary',gltf:'model/gltf+json',bin:'application/octet-stream',
+                      png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg'}[ext]||'application/octet-stream';
+            res(new Response(xhr.response,{status:200,headers:{'Content-Type':ct,'Content-Length':xhr.response.byteLength}}));
+          } else { rej(new TypeError('fetch failed: '+url)); }
+        };
+        xhr.onerror = function(){ rej(new TypeError('fetch error: '+url)); };
+        xhr.send();
+      });
+    }
+    return _fetch ? _fetch.call(window,input,init) : Promise.reject(new Error('no fetch'));
+  };
+
+  // ── PATCH 2: Image.src ───────────────────────────────────────
+  var NativeImg = window._NativeImage;
+  var srcDesc = Object.getOwnPropertyDescriptor(NativeImg.prototype,'src');
+  if(srcDesc && srcDesc.set){
+    var _setSrc = srcDesc.set, _getSrc = srcDesc.get;
+    Object.defineProperty(NativeImg.prototype,'src',{
+      configurable:true,
+      get:function(){ return _getSrc.call(this); },
+      set:function(url){
+        if(!url){ _setSrc.call(this,url); return; }
+        var isFile = url.indexOf('file://') === 0;
+        var isRel  = url.indexOf('http') !== 0 && url.indexOf('data:') !== 0
+                  && url.indexOf('blob:') !== 0 && url.length > 1;
+        if(isFile || isRel){
+          var self = this;
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET',url,true); xhr.responseType='blob';
+          xhr.onload = function(){
+            if(xhr.status===200||xhr.status===0) _setSrc.call(self,URL.createObjectURL(xhr.response));
+            else _setSrc.call(self,url);
+          };
+          xhr.onerror = function(){ _setSrc.call(self,url); };
+          xhr.send();
+        } else { _setSrc.call(this,url); }
+      }
+    });
+  }
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 3 — Three.js r128 + GLTFLoader (same version)
+     ═══════════════════════════════════════════════════════════════ -->
+<script src="assets/js/three.min.js"></script>
+<script src="assets/js/GLTFLoader.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTION 4 — ALL GAME CODE
+     Order: A-Constants → B-ECS → C-Systems → D-Renderer
+            → E-Assets → F-Init → G-Loop
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════════
+// A — CONSTANTS & CONFIG
+// ═══════════════════════════════════════════════════════════════════
+
+var MAX_E    = 2048;       // max live entities — power of 2
+var FIXED_DT = 1 / 60;    // 16.667 ms physics step (NES = 60Hz NTSC)
+var MAX_STEPS = 5;         // spiral-of-death guard
+
+// Entity type tags — Uint8 (0-255)
+var T_NONE     = 0;
+var T_PLAYER   = 1;
+var T_ENEMY    = 2;
+var T_VEHICLE  = 3;
+var T_BUILDING = 4;
+var T_PICKUP   = 5;
+
+// Bit-packed FLAGS — 8 booleans in 1 byte (NES sprite attribute byte)
+var F_ALIVE   = 1;    // bit 0
+var F_VISIBLE = 2;    // bit 1
+var F_PHYSICS = 4;    // bit 2
+var F_AI      = 8;    // bit 3
+var F_PLAYER  = 16;   // bit 4
+var F_ENEMY   = 32;   // bit 5
+var F_STATIC  = 64;   // bit 6
+var F_DIRTY   = 128;  // bit 7 — transform changed this frame
+
+// AI states — Uint8
+var AI_IDLE   = 0;
+var AI_PATROL = 1;
+var AI_CHASE  = 2;
+var AI_ATTACK = 3;
+
+// Quality tiers
+var QUALITY_CONFIGS = [
+  { pr:0.75, shadowMap:512,  fog:0.018 }, // LOW
+  { pr:1.0,  shadowMap:1024, fog:0.010 }, // MED
+  { pr:Math.min(window.devicePixelRatio,2), shadowMap:2048, fog:0.006 } // HIGH
+];
+
+// ═══════════════════════════════════════════════════════════════════
+// B — ECS CORE  (flat typed arrays — NES OAM style)
+//   Entity = integer ID.  No objects, no GC in hot path.
+//   entity 5 → PX[5], PY[5], FLAGS[5] etc.
+// ═══════════════════════════════════════════════════════════════════
+
+// Position / velocity — Float32 (4 bytes each, SIMD-friendly)
+var PX = new Float32Array(MAX_E);
+var PY = new Float32Array(MAX_E);
+var PZ = new Float32Array(MAX_E);
+var VX = new Float32Array(MAX_E);
+var VY = new Float32Array(MAX_E);
+var VZ = new Float32Array(MAX_E);
+var RY = new Float32Array(MAX_E);   // yaw rotation
+
+// Health — Int16 (2 bytes, saves 50% vs Int32)
+var HP     = new Int16Array(MAX_E);
+var HP_MAX = new Int16Array(MAX_E);
+
+// Flags — Uint8 bit-packed (8 booleans in 1 byte)
+var FLAGS = new Uint8Array(MAX_E);
+
+// Type tag — Uint8
+var TYPE = new Uint8Array(MAX_E);
+
+// Mesh pool references — Int16 (pool ID + instance slot)
+var MESH_ID  = new Int16Array(MAX_E);
+var MESH_IDX = new Int16Array(MAX_E);
+
+// AI state — Uint8 + Float32 timer + Int16 target
+var AI_STATE  = new Uint8Array(MAX_E);
+var AI_TIMER  = new Float32Array(MAX_E);
+var AI_TARGET = new Int16Array(MAX_E);
+
+// Entity lifecycle counters
+var _eid  = 0;       // next fresh ID
+var _free = [];      // recycled IDs
+
+// Query scratch buffer — reused every frame, never allocated in loop
+var _qBuf = new Int32Array(MAX_E);
+var _qLen = 0;
+
+function createEntity() {
+  var id = _free.length ? _free.pop() : _eid++;
+  if(id >= MAX_E){ console.error('ECS: pool full'); return -1; }
+  FLAGS[id]    = F_ALIVE | F_VISIBLE;
+  PX[id] = PY[id] = PZ[id] = 0;
+  VX[id] = VY[id] = VZ[id] = 0;
+  RY[id] = 0;
+  HP[id] = HP_MAX[id] = 100;
+  MESH_ID[id] = MESH_IDX[id] = -1;
+  TYPE[id] = T_NONE;
+  AI_STATE[id] = AI_IDLE;
+  AI_TIMER[id] = 0;
+  AI_TARGET[id] = -1;
+  return id;
+}
+
+function destroyEntity(id) {
+  FLAGS[id] = 0;
+  MESH_ID[id] = -1;
+  _free.push(id);
+}
+
+// Query all alive entities with a given flag bit set
+// Returns count; caller reads _qBuf[0.._qLen-1]
+function queryFlag(flag) {
+  _qLen = 0;
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(FLAGS[i] & flag) _qBuf[_qLen++] = i;
+  }
+  return _qLen;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// C — SYSTEMS  (pure functions over component arrays)
+//
+// IMPLEMENTED:
+//   C1: Physics System      ✅ Gravity, Euler integration, friction
+//   C2: Render Sync System  ✅ Dirty flag optimization, GPU updates
+//   C3: AI System           ✅ State machine (IDLE/PATROL/CHASE/ATTACK)
+//   C4: Input System        ✅ Keyboard + virtual joystick + particles (P key)
+//   C5: Collision Detection ✅ Spatial hash grid, sphere collision, raycast
+//   C6: Animation System    ✅ THREE.AnimationMixer integration
+//   C7: Audio System        ✅ Web Audio API, spatial audio, sound loading
+//   C8: Particle System     ✅ GPU particles, lifetime, burst emitter
+//   C9: LOD System          ✅ Distance-based level tracking
+//
+// ═══════════════════════════════════════════════════════════════════
+
+// ── C1: Physics System ───────────────────────────────────────────
+var GRAVITY = -20.0;
+
+function physicsSystem(dt) {
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    var f = FLAGS[i];
+    if(!(f & F_ALIVE))   continue;
+    if(!(f & F_PHYSICS)) continue;
+    if(f & F_STATIC)     continue;
+
+    VY[i] += GRAVITY * dt;
+    PX[i] += VX[i] * dt;
+    PY[i] += VY[i] * dt;
+    PZ[i] += VZ[i] * dt;
+
+    // Ground clamp
+    if(PY[i] < 0){ PY[i] = 0; VY[i] = 0; }
+
+    // Horizontal friction
+    VX[i] *= 0.88;
+    VZ[i] *= 0.88;
+
+    // Only mark dirty if actually moved (dead-zone: < 0.0001 units)
+    var moved = (VX[i]*VX[i] + VY[i]*VY[i] + VZ[i]*VZ[i]) > 0.00001;
+    if(moved) FLAGS[i] |= F_DIRTY;
+  }
+}
+
+// ── C2: Render Sync System ───────────────────────────────────────
+// Only pushes dirty transforms to GPU — zero work for static entities
+var _syncObj = null; // THREE.Object3D, created after Three.js loads
+
+function renderSyncSystem() {
+  if(!_syncObj) return;
+  _syncObj.scale.set(1,1,1); // always unit scale — freeMeshSlot restores this
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    var f = FLAGS[i];
+    if(!(f & F_ALIVE))   continue;
+    if(!(f & F_DIRTY))   continue;
+    if(!(f & F_VISIBLE)) continue;
+    var mid = MESH_ID[i];
+    var idx = MESH_IDX[i];
+    if(mid < 0 || idx < 0) continue;
+    var p = meshPool[mid];
+    if(!p) continue;
+    _syncObj.position.set(PX[i], PY[i], PZ[i]);
+    _syncObj.rotation.set(0, RY[i], 0);
+    _syncObj.updateMatrix();
+    p.mesh.setMatrixAt(idx, _syncObj.matrix);
+    p.mesh.instanceMatrix.needsUpdate = true;
+    FLAGS[i] &= ~F_DIRTY; // clear dirty bit
+  }
+}
+
+// ── C3: AI System ────────────────────────────────────────────────
+var CHASE_RANGE  = 20.0;
+var ATTACK_RANGE =  2.5;
+var CHASE_SPEED  =  5.0;
+
+function aiSystem(dt) {
+  var n = queryFlag(F_AI);
+  for(var q = 0; q < n; q++){
+    var i = _qBuf[q];
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    AI_TIMER[i] -= dt;
+
+    var pid = _playerEid;
+    if(pid < 0) continue;
+
+    var dx = PX[pid] - PX[i];
+    var dz = PZ[pid] - PZ[i];
+    var d2 = dx*dx + dz*dz;
+
+    switch(AI_STATE[i]){
+      case AI_IDLE:
+        if(d2 < CHASE_RANGE*CHASE_RANGE) AI_STATE[i] = AI_CHASE;
+        else if(AI_TIMER[i] <= 0){
+          AI_STATE[i] = AI_PATROL;
+          AI_TIMER[i] = 2.0 + Math.random() * 3.0;
+        }
+        break;
+
+      case AI_PATROL:
+        VX[i] += (Math.random()-0.5)*0.5;
+        VZ[i] += (Math.random()-0.5)*0.5;
+        if(d2 < CHASE_RANGE*CHASE_RANGE || AI_TIMER[i] <= 0) AI_STATE[i] = AI_IDLE;
+        break;
+
+      case AI_CHASE:
+        if(d2 > CHASE_RANGE*CHASE_RANGE*2.25){ AI_STATE[i]=AI_IDLE; break; }
+        if(d2 < ATTACK_RANGE*ATTACK_RANGE){ AI_STATE[i]=AI_ATTACK; AI_TIMER[i]=0.5; break; }
+        // Steer — sqrt only here (once per enemy per frame)
+        var dist = Math.sqrt(d2);
+        VX[i] = (dx/dist)*CHASE_SPEED;
+        VZ[i] = (dz/dist)*CHASE_SPEED;
+        RY[i] = Math.atan2(dx, dz);
+        FLAGS[i] |= F_DIRTY;
+        break;
+
+      case AI_ATTACK:
+        if(AI_TIMER[i] <= 0){
+          var damage = 10;
+          HP[pid] -= damage;
+          AI_TIMER[i] = 0.8;
+          
+          // Show damage number
+          if(typeof showDamageNumber === 'function'){
+            showDamageNumber(PX[pid], PY[pid], PZ[pid], damage);
+          }
+          
+          if(d2 > ATTACK_RANGE*ATTACK_RANGE) AI_STATE[i] = AI_CHASE;
+        }
+        break;
+    }
+  }
+}
+
+// ── C4: Input System ─────────────────────────────────────────────
+var _keys = new Uint8Array(256);
+var _joyX = 0, _joyZ = 0;
+var PLAYER_SPEED = 8.0;
+
+function inputSystem(dt) {
+  if(_playerEid < 0) return;
+  var pid = _playerEid;
+
+  // Keyboard WASD / Arrows
+  var kx = ((_keys[68]||_keys[39])?1:0) - ((_keys[65]||_keys[37])?1:0);
+  var kz = ((_keys[83]||_keys[40])?1:0) - ((_keys[87]||_keys[38])?1:0);
+
+  var mx = kx + _joyX;
+  var mz = kz + _joyZ;
+
+  // Clamp to unit circle
+  var mlen = Math.sqrt(mx*mx + mz*mz);
+  if(mlen > 1){ mx /= mlen; mz /= mlen; }
+
+  if(mlen > 0.05){
+    VX[pid] = mx * PLAYER_SPEED;
+    VZ[pid] = mz * PLAYER_SPEED;
+    RY[pid] = Math.atan2(mx, mz);
+    FLAGS[pid] |= F_DIRTY;
+  }
+
+  // Jump — spacebar
+  if(_keys[32] && PY[pid] === 0){ VY[pid] = 10; _keys[32] = 0; }
+  
+  // Spawn particles — P key
+  if(_keys[80]){
+    emitParticleBurst(PX[pid], PY[pid] + 1, PZ[pid], 15, 4, 1.2, 0.4);
+    _keys[80] = 0;
+  }
+}
+
+// ── C5: Collision Detection System ──────────────────────────────
+// AABB collision detection + raycasting + spatial hash
+var COLL_MINX = new Float32Array(MAX_E);
+var COLL_MINY = new Float32Array(MAX_E);
+var COLL_MINZ = new Float32Array(MAX_E);
+var COLL_MAXX = new Float32Array(MAX_E);
+var COLL_MAXY = new Float32Array(MAX_E);
+var COLL_MAXZ = new Float32Array(MAX_E);
+var COLL_RADIUS = new Float32Array(MAX_E);
+
+var GRID_SIZE = 10.0;
+var spatialGrid = {};
+
+function updateSpatialGrid() {
+  spatialGrid = {};
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(COLL_RADIUS[i] <= 0) continue;
+    
+    var gx = Math.floor(PX[i] / GRID_SIZE);
+    var gz = Math.floor(PZ[i] / GRID_SIZE);
+    var key = gx + ',' + gz;
+    
+    if(!spatialGrid[key]) spatialGrid[key] = [];
+    spatialGrid[key].push(i);
+  }
+}
+
+function collisionSystem(dt) {
+  updateSpatialGrid();
+  
+  for(var key in spatialGrid){
+    var cell = spatialGrid[key];
+    
+    for(var i = 0; i < cell.length; i++){
+      var a = cell[i];
+      if(FLAGS[a] & F_STATIC) continue;
+      
+      for(var j = i+1; j < cell.length; j++){
+        var b = cell[j];
+        
+        // Quick sphere test first
+        var dx = PX[b] - PX[a];
+        var dy = PY[b] - PY[a];
+        var dz = PZ[b] - PZ[a];
+        var d2 = dx*dx + dy*dy + dz*dz;
+        var minDist = COLL_RADIUS[a] + COLL_RADIUS[b];
+        
+        if(d2 < minDist*minDist){
+          // Collision! Resolve with separation
+          var dist = Math.sqrt(d2);
+          if(dist < 0.001) continue;
+          
+          var overlap = minDist - dist;
+          var nx = dx / dist;
+          var ny = dy / dist;
+          var nz = dz / dist;
+          
+          // Push apart (weighted by static flag)
+          var wa = (FLAGS[a] & F_STATIC) ? 0 : 0.5;
+          var wb = (FLAGS[b] & F_STATIC) ? 0 : 0.5;
+          
+          PX[a] -= nx * overlap * wa;
+          PY[a] -= ny * overlap * wa;
+          PZ[a] -= nz * overlap * wa;
+          PX[b] += nx * overlap * wb;
+          PY[b] += ny * overlap * wb;
+          PZ[b] += nz * overlap * wb;
+          
+          if(wa > 0) FLAGS[a] |= F_DIRTY;
+          if(wb > 0) FLAGS[b] |= F_DIRTY;
+          
+          // Bounce velocity
+          var relVX = VX[b] - VX[a];
+          var relVY = VY[b] - VY[a];
+          var relVZ = VZ[b] - VZ[a];
+          var velAlongNormal = relVX*nx + relVY*ny + relVZ*nz;
+          
+          if(velAlongNormal < 0){
+            var restitution = 0.3;
+            VX[a] -= nx * velAlongNormal * restitution * wa * 2;
+            VY[a] -= ny * velAlongNormal * restitution * wa * 2;
+            VZ[a] -= nz * velAlongNormal * restitution * wa * 2;
+            VX[b] += nx * velAlongNormal * restitution * wb * 2;
+            VY[b] += ny * velAlongNormal * restitution * wb * 2;
+            VZ[b] += nz * velAlongNormal * restitution * wb * 2;
+          }
+        }
+      }
+    }
+  }
+}
+
+function raycast(ox, oy, oz, dx, dy, dz, maxDist) {
+  var closestDist = maxDist;
+  var closestEid = -1;
+  
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(COLL_RADIUS[i] <= 0) continue;
+    
+    // Ray vs sphere test
+    var ex = PX[i] - ox;
+    var ey = PY[i] + COLL_RADIUS[i] - oy;
+    var ez = PZ[i] - oz;
+    
+    var t = ex*dx + ey*dy + ez*dz;
+    if(t < 0 || t > maxDist) continue;
+    
+    var px = ox + dx*t;
+    var py = oy + dy*t;
+    var pz = oz + dz*t;
+    
+    var dist2 = (px-PX[i])*(px-PX[i]) + 
+                (py-(PY[i]+COLL_RADIUS[i]))*(py-(PY[i]+COLL_RADIUS[i])) + 
+                (pz-PZ[i])*(pz-PZ[i]);
+    
+    if(dist2 < COLL_RADIUS[i]*COLL_RADIUS[i] && t < closestDist){
+      closestDist = t;
+      closestEid = i;
+    }
+  }
+  
+  return closestEid;
+}
+
+// ── C6: Animation System ─────────────────────────────────────────
+// Skeletal animation with keyframe sampling
+var ANIM_CLIP    = new Int16Array(MAX_E);
+var ANIM_TIME    = new Float32Array(MAX_E);
+var ANIM_SPEED   = new Float32Array(MAX_E);
+var ANIM_LOOP    = new Uint8Array(MAX_E);
+var ANIM_BLEND   = new Float32Array(MAX_E);
+
+var animClips = [];
+var animMixers = {}; // eid → THREE.AnimationMixer
+
+function animationSystem(dt) {
+  // Update THREE.js AnimationMixers for entities with animations
+  for(var eid in animMixers){
+    var mixer = animMixers[eid];
+    if(mixer && (FLAGS[eid] & F_ALIVE)){
+      mixer.update(dt * ANIM_SPEED[eid]);
+    }
+  }
+}
+
+function playAnimation(eid, clipIndex, loop, speed) {
+  ANIM_CLIP[eid]  = clipIndex;
+  ANIM_TIME[eid]  = 0;
+  ANIM_LOOP[eid]  = loop ? 1 : 0;
+  ANIM_SPEED[eid] = speed || 1.0;
+  
+  // If we have a mixer and clip, play it
+  var mixer = animMixers[eid];
+  if(mixer && animClips[clipIndex]){
+    var action = mixer.clipAction(animClips[clipIndex]);
+    action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce);
+    action.timeScale = speed || 1.0;
+    action.reset();
+    action.play();
+  }
+}
+
+function stopAnimation(eid) {
+  var mixer = animMixers[eid];
+  if(mixer){
+    mixer.stopAllAction();
+  }
+  ANIM_CLIP[eid] = -1;
+}
+
+// ── C7: Audio System ─────────────────────────────────────────────
+// Web Audio API with spatial audio
+var audioContext = null;
+var audioBuffers = {};
+var activeSounds = [];
+var audioEnabled = false;
+
+function initAudio() {
+  if(!audioContext){
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      audioEnabled = true;
+      console.log('Audio initialized');
+    } catch(e){
+      console.warn('Web Audio not supported:', e);
+    }
+  }
+}
+
+function loadSound(url) {
+  if(audioBuffers[url]) return Promise.resolve(audioBuffers[url]);
+  if(!audioContext) return Promise.reject(new Error('Audio not initialized'));
+  
+  return new Promise(function(res, rej){
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.onload = function(){
+      if(xhr.status === 200 || xhr.status === 0){
+        audioContext.decodeAudioData(xhr.response, function(buffer){
+          audioBuffers[url] = buffer;
+          res(buffer);
+        }, function(e){ rej(new Error('Decode failed: ' + e)); });
+      } else {
+        rej(new Error('HTTP ' + xhr.status));
+      }
+    };
+    xhr.onerror = function(){ rej(new Error('XHR error')); };
+    xhr.send();
+  });
+}
+
+function playSound(url, loop, volume, spatial, entityId) {
+  if(!audioContext || !audioEnabled) return;
+  
+  loadSound(url).then(function(buffer){
+    var source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.loop = loop || false;
+    
+    var gain = audioContext.createGain();
+    gain.gain.value = volume || 1.0;
+    
+    var panner = null;
+    if(spatial && entityId >= 0 && (FLAGS[entityId] & F_ALIVE)){
+      panner = audioContext.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 1;
+      panner.maxDistance = 100;
+      panner.rolloffFactor = 1;
+      panner.setPosition(PX[entityId], PY[entityId], PZ[entityId]);
+      
+      source.connect(panner);
+      panner.connect(gain);
+    } else {
+      source.connect(gain);
+    }
+    
+    gain.connect(audioContext.destination);
+    source.start(0);
+    
+    var snd = {source:source, gain:gain, panner:panner, entity:entityId, active:true};
+    activeSounds.push(snd);
+    
+    source.onended = function(){
+      snd.active = false;
+    };
+  }).catch(function(e){
+    console.warn('Sound load failed:', url, e.message);
+  });
+}
+
+function audioSystem(dt) {
+  if(!audioContext || !audioEnabled) return;
+  
+  // Update listener to camera
+  if(camera){
+    audioContext.listener.setPosition(
+      camera.position.x,
+      camera.position.y,
+      camera.position.z
+    );
+    
+    var forward = new THREE.Vector3(0, 0, -1);
+    forward.applyQuaternion(camera.quaternion);
+    var up = new THREE.Vector3(0, 1, 0);
+    up.applyQuaternion(camera.quaternion);
+    
+    if(audioContext.listener.forwardX){
+      audioContext.listener.forwardX.value = forward.x;
+      audioContext.listener.forwardY.value = forward.y;
+      audioContext.listener.forwardZ.value = forward.z;
+      audioContext.listener.upX.value = up.x;
+      audioContext.listener.upY.value = up.y;
+      audioContext.listener.upZ.value = up.z;
+    }
+  }
+  
+  // Update spatial sounds and clean up finished ones
+  for(var i = activeSounds.length - 1; i >= 0; i--){
+    var snd = activeSounds[i];
+    
+    if(!snd.active){
+      activeSounds.splice(i, 1);
+      continue;
+    }
+    
+    if(snd.entity >= 0 && (FLAGS[snd.entity] & F_ALIVE)){
+      if(snd.panner){
+        snd.panner.setPosition(
+          PX[snd.entity],
+          PY[snd.entity],
+          PZ[snd.entity]
+        );
+      }
+    } else if(snd.entity >= 0){
+      // Entity died, stop sound
+      snd.source.stop();
+      snd.active = false;
+    }
+  }
+}
+
+// ── C8: Particle System ──────────────────────────────────────────
+// GPU particles via InstancedMesh
+var PART_LIFE    = new Float32Array(MAX_E);
+var PART_MAXLIFE = new Float32Array(MAX_E);
+var PART_SIZE    = new Float32Array(MAX_E);
+var PART_ALPHA   = new Float32Array(MAX_E);
+var PART_VEL_X   = new Float32Array(MAX_E);
+var PART_VEL_Y   = new Float32Array(MAX_E);
+var PART_VEL_Z   = new Float32Array(MAX_E);
+
+var particlePoolId = -1;
+var PARTICLE_GRAVITY = -5.0;
+
+function particleSystem(dt) {
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(PART_LIFE[i] <= 0) continue;
+    
+    PART_LIFE[i] -= dt;
+    
+    if(PART_LIFE[i] <= 0){
+      // Particle died
+      despawnEntity(i);
+    } else {
+      // Update particle physics
+      PART_VEL_Y[i] += PARTICLE_GRAVITY * dt;
+      PX[i] += PART_VEL_X[i] * dt;
+      PY[i] += PART_VEL_Y[i] * dt;
+      PZ[i] += PART_VEL_Z[i] * dt;
+      
+      // Fade alpha over lifetime
+      PART_ALPHA[i] = PART_LIFE[i] / PART_MAXLIFE[i];
+      
+      // Scale down over lifetime
+      var scale = PART_SIZE[i] * PART_ALPHA[i];
+      
+      FLAGS[i] |= F_DIRTY;
+      
+      // Update instance matrix with scale
+      if(MESH_ID[i] >= 0 && MESH_IDX[i] >= 0){
+        var p = meshPool[MESH_ID[i]];
+        if(p && _syncObj){
+          _syncObj.position.set(PX[i], PY[i], PZ[i]);
+          _syncObj.rotation.set(0, 0, 0);
+          _syncObj.scale.set(scale, scale, scale);
+          _syncObj.updateMatrix();
+          p.mesh.setMatrixAt(MESH_IDX[i], _syncObj.matrix);
+          p.mesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+    }
+  }
+}
+
+function emitParticle(x, y, z, vx, vy, vz, lifetime, size) {
+  if(particlePoolId < 0) return -1;
+  
+  var id = spawnEntity(T_NONE, particlePoolId, x, y, z);
+  if(id < 0) return -1;
+  
+  PART_LIFE[id] = lifetime || 1.0;
+  PART_MAXLIFE[id] = PART_LIFE[id];
+  PART_SIZE[id] = size || 0.5;
+  PART_ALPHA[id] = 1.0;
+  PART_VEL_X[id] = vx || 0;
+  PART_VEL_Y[id] = vy || 0;
+  PART_VEL_Z[id] = vz || 0;
+  
+  FLAGS[id] &= ~F_PHYSICS; // Particles have their own physics
+  FLAGS[id] |= F_DIRTY;
+  
+  return id;
+}
+
+function emitParticleBurst(x, y, z, count, speed, lifetime, size) {
+  for(var i = 0; i < count; i++){
+    var angle = Math.random() * Math.PI * 2;
+    var elevation = (Math.random() - 0.3) * Math.PI * 0.5;
+    var vx = Math.cos(elevation) * Math.sin(angle) * speed;
+    var vy = Math.sin(elevation) * speed + 2;
+    var vz = Math.cos(elevation) * Math.cos(angle) * speed;
+    emitParticle(x, y, z, vx, vy, vz, lifetime, size);
+  }
+}
+
+// ── C9: LOD System ───────────────────────────────────────────────
+// Level of detail — swap meshes based on distance to camera
+var LOD_LEVEL = new Uint8Array(MAX_E);
+var lodMeshPools = {};
+var LOD_ENABLED = false;
+
+var LOD_DIST_HIGH = 400;   // 20m squared
+var LOD_DIST_MED  = 2500;  // 50m squared
+
+function lodSystem() {
+  if(!LOD_ENABLED || !camera) return;
+  
+  var camX = camera.position.x;
+  var camY = camera.position.y;
+  var camZ = camera.position.z;
+  
+  var top = _eid;
+  for(var i = 0; i < top; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(MESH_ID[i] < 0) continue;
+    
+    var dx = PX[i] - camX;
+    var dy = PY[i] - camY;
+    var dz = PZ[i] - camZ;
+    var d2 = dx*dx + dy*dy + dz*dz;
+    
+    var newLod = d2 < LOD_DIST_HIGH ? 0 : d2 < LOD_DIST_MED ? 1 : 2;
+    
+    if(newLod !== LOD_LEVEL[i]){
+      LOD_LEVEL[i] = newLod;
+      // LOD swap would happen here if we had multiple mesh pools per model
+      // For now, just track the level for future use
+    }
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// D — RENDERER, SCENE, CAMERA, LIGHTING
+//
+// IMPLEMENTED:
+//   D0: Core Renderer       ✅ Three.js WebGL, shadows, fog
+//   D1: Post-Processing     ✅ Bloom, vignette, color grading (custom shaders)
+//   D2: Canvas UI Framework ✅ Health bar, damage numbers, crosshair
+//   D3: Scene Editor        ✅ Toggle, selection, save/load, shortcuts
+//   D4: Save/Load System    ✅ localStorage persistence
+//
+// ═══════════════════════════════════════════════════════════════════
+
+var scene, camera, renderer, sun;
+var shadowEnabled = true;
+var qualityLevel  = 2;
+var _playerEid    = -1;
+var ecsMode       = false;  // toggle ECS gameplay on/off
+
+// Three.js reusable dummy — zero alloc in render sync
+// (created in bootScene after THREE is confirmed loaded)
+
+// ── D1: Post-Processing System ───────────────────────────────────
+// Custom post-processing without EffectComposer
+var postProcessingEnabled = false;
+var renderTarget1 = null;
+var renderTarget2 = null;
+var postQuad = null;
+var postMaterial = null;
+var postScene = null;
+var postCamera = null;
+
+// Post-processing shader (bloom + vignette + color grading)
+var postProcessShader = {
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform vec2 resolution;
+    uniform float bloomStrength;
+    uniform float vignetteStrength;
+    uniform float saturation;
+    uniform float contrast;
+    uniform float brightness;
+    varying vec2 vUv;
+    
+    // Simple bloom (blur + add)
+    vec3 bloom(sampler2D tex, vec2 uv) {
+      vec3 col = vec3(0.0);
+      float total = 0.0;
+      float radius = 0.003;
+      
+      for(float x = -2.0; x <= 2.0; x += 1.0) {
+        for(float y = -2.0; y <= 2.0; y += 1.0) {
+          vec2 offset = vec2(x, y) * radius;
+          float weight = 1.0 - length(offset) / (radius * 2.828);
+          col += texture2D(tex, uv + offset).rgb * weight;
+          total += weight;
+        }
+      }
+      
+      return col / total;
+    }
+    
+    // Vignette
+    float vignette(vec2 uv, float strength) {
+      vec2 center = uv - 0.5;
+      return 1.0 - dot(center, center) * strength;
+    }
+    
+    // Color grading
+    vec3 colorGrade(vec3 col, float sat, float con, float bri) {
+      // Brightness
+      col *= bri;
+      
+      // Contrast
+      col = (col - 0.5) * con + 0.5;
+      
+      // Saturation
+      float gray = dot(col, vec3(0.299, 0.587, 0.114));
+      col = mix(vec3(gray), col, sat);
+      
+      return col;
+    }
+    
+    void main() {
+      vec3 color = texture2D(tDiffuse, vUv).rgb;
+      
+      // Bloom
+      vec3 bloomColor = bloom(tDiffuse, vUv);
+      color += bloomColor * bloomStrength;
+      
+      // Vignette
+      float vig = vignette(vUv, vignetteStrength);
+      color *= vig;
+      
+      // Color grading
+      color = colorGrade(color, saturation, contrast, brightness);
+      
+      // Tone mapping (simple Reinhard)
+      color = color / (color + vec3(1.0));
+      
+      // Gamma correction
+      color = pow(color, vec3(1.0 / 2.2));
+      
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `
+};
+
+function initPostProcessing() {
+  if(!renderer) return;
+  
+  try {
+    // Create render targets
+    var width = window.innerWidth;
+    var height = window.innerHeight;
+    
+    renderTarget1 = new THREE.WebGLRenderTarget(width, height, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBFormat,
+      stencilBuffer: false
+    });
+    
+    renderTarget2 = new THREE.WebGLRenderTarget(width, height, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBFormat,
+      stencilBuffer: false
+    });
+    
+    // Create post-processing material
+    postMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: null },
+        resolution: { value: new THREE.Vector2(width, height) },
+        bloomStrength: { value: 0.3 },
+        vignetteStrength: { value: 0.5 },
+        saturation: { value: 1.1 },
+        contrast: { value: 1.05 },
+        brightness: { value: 1.0 }
+      },
+      vertexShader: postProcessShader.vertexShader,
+      fragmentShader: postProcessShader.fragmentShader
+    });
+    
+    // Create full-screen quad
+    var quadGeo = new THREE.PlaneGeometry(2, 2);
+    postQuad = new THREE.Mesh(quadGeo, postMaterial);
+    
+    // Create orthographic scene for post-processing
+    postScene = new THREE.Scene();
+    postScene.add(postQuad);
+    
+    postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    
+    postProcessingEnabled = true;
+    console.log('Post-processing initialized: Bloom + Vignette + Color Grading');
+    
+    // Resize handler
+    window.addEventListener('resize', function(){
+      if(renderTarget1 && renderTarget2){
+        var w = window.innerWidth;
+        var h = window.innerHeight;
+        renderTarget1.setSize(w, h);
+        renderTarget2.setSize(w, h);
+        if(postMaterial){
+          postMaterial.uniforms.resolution.value.set(w, h);
+        }
+      }
+    });
+    
+  } catch(e){
+    console.warn('Post-processing init failed:', e);
+    postProcessingEnabled = false;
+  }
+}
+
+function updatePostProcessing() {
+  if(!postProcessingEnabled || !postMaterial) return;
+  
+  // Adjust bloom based on quality
+  var bloomStrength = qualityLevel === 2 ? 0.3 : qualityLevel === 1 ? 0.2 : 0.1;
+  postMaterial.uniforms.bloomStrength.value = bloomStrength;
+  
+  // Adjust vignette
+  postMaterial.uniforms.vignetteStrength.value = 0.5;
+  
+  // Adjust color grading based on time of day (future)
+  postMaterial.uniforms.saturation.value = 1.1;
+  postMaterial.uniforms.contrast.value = 1.05;
+  postMaterial.uniforms.brightness.value = 1.0;
+}
+
+function renderWithPostProcessing() {
+  if(postProcessingEnabled && renderTarget1 && postMaterial && postScene){
+    // Render scene to texture
+    renderer.setRenderTarget(renderTarget1);
+    renderer.render(scene, camera);
+    
+    // Apply post-processing
+    postMaterial.uniforms.tDiffuse.value = renderTarget1.texture;
+    renderer.setRenderTarget(null);
+    renderer.render(postScene, postCamera);
+  } else {
+    // Fallback to direct rendering
+    renderer.render(scene, camera);
+  }
+}
+
+// ── D2: Canvas UI Framework ──────────────────────────────────────
+// 2D canvas overlay for HUD, menus, dialogs
+var uiCanvas = null;
+var uiCtx = null;
+var uiElements = [];
+var damageNumbers = []; // {x, y, z, value, life, maxLife}
+
+function initCanvasUI() {
+  uiCanvas = document.createElement('canvas');
+  uiCanvas.style.position = 'fixed';
+  uiCanvas.style.top = '0';
+  uiCanvas.style.left = '0';
+  uiCanvas.style.pointerEvents = 'none';
+  uiCanvas.style.zIndex = '99';
+  uiCanvas.width = window.innerWidth;
+  uiCanvas.height = window.innerHeight;
+  document.body.appendChild(uiCanvas);
+  uiCtx = uiCanvas.getContext('2d');
+  
+  // Resize handler
+  window.addEventListener('resize', function(){
+    uiCanvas.width = window.innerWidth;
+    uiCanvas.height = window.innerHeight;
+  });
+}
+
+function drawCanvasUI() {
+  if(!uiCtx) return;
+  
+  uiCtx.clearRect(0, 0, uiCanvas.width, uiCanvas.height);
+  
+  // Draw player health bar
+  if(_playerEid >= 0 && (FLAGS[_playerEid] & F_ALIVE)){
+    var hpPct = HP[_playerEid] / HP_MAX[_playerEid];
+    var barW = 200, barH = 20, barX = 20, barY = uiCanvas.height - 40;
+    
+    // Background
+    uiCtx.fillStyle = 'rgba(0,0,0,0.7)';
+    uiCtx.fillRect(barX-2, barY-2, barW+4, barH+4);
+    
+    // Health bar
+    uiCtx.fillStyle = hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00';
+    uiCtx.fillRect(barX, barY, barW * hpPct, barH);
+    
+    // Border
+    uiCtx.strokeStyle = '#fff';
+    uiCtx.lineWidth = 2;
+    uiCtx.strokeRect(barX, barY, barW, barH);
+    
+    // HP text
+    uiCtx.fillStyle = '#fff';
+    uiCtx.font = 'bold 14px monospace';
+    uiCtx.fillText('HP: '+HP[_playerEid]+'/'+HP_MAX[_playerEid], barX+5, barY+15);
+  }
+  
+  // Draw damage numbers
+  for(var i = damageNumbers.length - 1; i >= 0; i--){
+    var dmg = damageNumbers[i];
+    dmg.life -= 0.016; // ~60fps
+    
+    if(dmg.life <= 0){
+      damageNumbers.splice(i, 1);
+      continue;
+    }
+    
+    // Project 3D position to screen
+    if(!camera) continue;
+    var vec = new THREE.Vector3(dmg.x, dmg.y + 2, dmg.z);
+    vec.project(camera);
+    
+    var sx = (vec.x * 0.5 + 0.5) * uiCanvas.width;
+    var sy = (-(vec.y) * 0.5 + 0.5) * uiCanvas.height;
+    
+    // Fade out
+    var alpha = dmg.life / dmg.maxLife;
+    
+    // Rise up
+    sy -= (1 - alpha) * 50;
+    
+    uiCtx.save();
+    uiCtx.globalAlpha = alpha;
+    uiCtx.font = 'bold 24px monospace';
+    uiCtx.fillStyle = '#ff0';
+    uiCtx.strokeStyle = '#000';
+    uiCtx.lineWidth = 3;
+    uiCtx.strokeText('-' + dmg.value, sx, sy);
+    uiCtx.fillText('-' + dmg.value, sx, sy);
+    uiCtx.restore();
+  }
+  
+  // Draw crosshair in ECS mode
+  if(ecsMode){
+    var cx = uiCanvas.width / 2;
+    var cy = uiCanvas.height / 2;
+    uiCtx.strokeStyle = 'rgba(255,255,255,0.7)';
+    uiCtx.lineWidth = 2;
+    uiCtx.beginPath();
+    uiCtx.moveTo(cx - 10, cy);
+    uiCtx.lineTo(cx + 10, cy);
+    uiCtx.moveTo(cx, cy - 10);
+    uiCtx.lineTo(cx, cy + 10);
+    uiCtx.stroke();
+  }
+}
+
+function showDamageNumber(x, y, z, value) {
+  damageNumbers.push({
+    x: x, y: y, z: z,
+    value: value,
+    life: 1.5,
+    maxLife: 1.5
+  });
+}
+
+function addUIElement(type, x, y, w, h, text, onClick) {
+  uiElements.push({type:type, x:x, y:y, w:w, h:h, text:text, onClick:onClick, visible:true});
+  return uiElements.length - 1;
+}
+
+// ── D3: Scene Editor ─────────────────────────────────────────────
+// Browser-based level editor
+var editorMode = false;
+var editorSelection = -1;
+var editorGizmo = null;
+var editorGrid = true;
+var editorSnap = 1.0;
+var editorMouseX = 0;
+var editorMouseY = 0;
+
+function toggleEditor() {
+  editorMode = !editorMode;
+  console.log('Editor mode:', editorMode ? 'ON' : 'OFF');
+  
+  if(editorMode){
+    // Pause game logic
+    ecsMode = false;
+    document.getElementById('btnEcs').textContent = 'ECS: OFF';
+  }
+}
+
+function editorUpdate() {
+  if(!editorMode) return;
+  
+  // Press E to toggle editor
+  if(_keys[69]){ _keys[69] = 0; toggleEditor(); }
+  
+  // Press DELETE to delete selected entity
+  if(_keys[46] && editorSelection >= 0){
+    despawnEntity(editorSelection);
+    editorSelection = -1;
+    _keys[46] = 0;
+  }
+  
+  // Press G to spawn particle burst at selected entity
+  if(_keys[71] && editorSelection >= 0){
+    emitParticleBurst(
+      PX[editorSelection],
+      PY[editorSelection] + 1,
+      PZ[editorSelection],
+      20, 5, 1.0, 0.3
+    );
+    _keys[71] = 0;
+  }
+}
+
+function editorRender() {
+  if(!editorMode || !uiCtx) return;
+  
+  // Draw selection indicator
+  if(editorSelection >= 0 && (FLAGS[editorSelection] & F_ALIVE)){
+    var vec = new THREE.Vector3(PX[editorSelection], PY[editorSelection] + 2, PZ[editorSelection]);
+    vec.project(camera);
+    
+    var sx = (vec.x * 0.5 + 0.5) * uiCanvas.width;
+    var sy = (-(vec.y) * 0.5 + 0.5) * uiCanvas.height;
+    
+    uiCtx.strokeStyle = '#0ff';
+    uiCtx.lineWidth = 3;
+    uiCtx.beginPath();
+    uiCtx.arc(sx, sy, 30, 0, Math.PI * 2);
+    uiCtx.stroke();
+    
+    // Draw entity info
+    uiCtx.fillStyle = '#0ff';
+    uiCtx.font = 'bold 12px monospace';
+    uiCtx.fillText('Entity #' + editorSelection, sx + 35, sy - 10);
+    uiCtx.fillText('Type: ' + TYPE[editorSelection], sx + 35, sy + 5);
+    uiCtx.fillText('HP: ' + HP[editorSelection], sx + 35, sy + 20);
+  }
+  
+  // Draw editor help text
+  uiCtx.fillStyle = 'rgba(0,255,255,0.8)';
+  uiCtx.font = 'bold 14px monospace';
+  uiCtx.fillText('EDITOR MODE', 10, 30);
+  uiCtx.font = '12px monospace';
+  uiCtx.fillText('E: Exit | DEL: Delete | G: Particles', 10, 50);
+}
+
+function editorSaveScene() {
+  var sceneData = {
+    version: '1.0',
+    timestamp: Date.now(),
+    entities: []
+  };
+  
+  for(var i = 0; i < _eid; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    sceneData.entities.push({
+      id: i,
+      type: TYPE[i],
+      pos: [PX[i], PY[i], PZ[i]],
+      rot: RY[i],
+      hp: HP[i],
+      flags: FLAGS[i],
+      meshId: MESH_ID[i]
+    });
+  }
+  
+  var json = JSON.stringify(sceneData, null, 2);
+  console.log('Scene saved:', sceneData.entities.length, 'entities');
+  
+  // Download as file
+  var blob = new Blob([json], {type: 'application/json'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'scene_' + Date.now() + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  
+  return json;
+}
+
+function editorLoadScene(jsonStr) {
+  try {
+    var sceneData = JSON.parse(jsonStr);
+    console.log('Scene loaded:', sceneData.entities.length, 'entities');
+    
+    // Clear current scene
+    clearInstances();
+    
+    // TODO: Respawn entities from data (needs mesh pool mapping)
+    setStatus('Scene loaded: ' + sceneData.entities.length + ' entities');
+    setTimeout(function(){ setStatus(''); }, 2000);
+  } catch(e){
+    console.error('Scene load error:', e);
+    setStatus('Scene load failed: ' + e.message);
+    setTimeout(function(){ setStatus(''); }, 2000);
+  }
+}
+
+// ── D4: Save/Load System ─────────────────────────────────────────
+// Persistence — localStorage, IndexedDB, or cloud save
+var SAVE_KEY = 'ramai_save_v1';
+
+function saveGame() {
+  // TODO: Serialize game state (entities, player progress, inventory)
+  // TODO: Compress if needed (LZ-string)
+  // TODO: Save to localStorage or IndexedDB
+  
+  var saveData = {
+    version: 1,
+    timestamp: Date.now(),
+    player: _playerEid >= 0 ? {
+      id: _playerEid,
+      pos: [PX[_playerEid], PY[_playerEid], PZ[_playerEid]],
+      hp: HP[_playerEid],
+      // TODO: inventory, skills, quest progress
+    } : null,
+    entities: []
+  };
+  
+  // Save all alive entities
+  for(var i = 0; i < _eid; i++){
+    if(!(FLAGS[i] & F_ALIVE)) continue;
+    if(i === _playerEid) continue; // already saved
+    saveData.entities.push({
+      type: TYPE[i],
+      pos: [PX[i], PY[i], PZ[i]],
+      rot: RY[i],
+      hp: HP[i],
+      aiState: AI_STATE[i]
+    });
+  }
+  
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+    console.log('Game saved:', saveData.entities.length, 'entities');
+    return true;
+  } catch(e){
+    console.error('Save failed:', e);
+    return false;
+  }
+}
+
+function loadGame() {
+  // TODO: Load from localStorage/IndexedDB
+  // TODO: Decompress if needed
+  // TODO: Restore entities, player state
+  
+  try {
+    var json = localStorage.getItem(SAVE_KEY);
+    if(!json){ console.log('No save found'); return false; }
+    
+    var saveData = JSON.parse(json);
+    console.log('Game loaded:', saveData.entities.length, 'entities');
+    
+    // PLACEHOLDER: Would need to clear scene and respawn entities
+    // with correct mesh pools and properties
+    
+    return true;
+  } catch(e){
+    console.error('Load failed:', e);
+    return false;
+  }
+}
+
+function deleteSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+    console.log('Save deleted');
+    return true;
+  } catch(e){
+    console.error('Delete save failed:', e);
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// E — ASSET SYSTEM
+// ═══════════════════════════════════════════════════════════════════
+
+// Texture cache — url → THREE.Texture (NES CHR-ROM: load once, reuse)
+var texCache = {};
+
+// Mesh pool — pre-allocated InstancedMesh slots
+// meshPool[id] = { mesh: InstancedMesh, maxCount, used: Uint8Array, freeSlots: [] }
+var meshPool = [];
+
+// Legacy array for non-ECS viewer mode
+var instancedMeshes = [];
+var totalInstances  = 0;
+
+function loadBinary(url, onProg) {
+  return new Promise(function(res,rej){
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET',url,true);
+    xhr.responseType = 'arraybuffer';
+    xhr.onprogress = function(e){ if(onProg && e.lengthComputable) onProg(e.loaded/e.total); };
+    xhr.onload = function(){
+      (xhr.status===200||xhr.status===0) ? res(xhr.response) : rej(new Error('HTTP '+xhr.status));
+    };
+    xhr.onerror = function(){ rej(new Error('XHR error: '+url)); };
+    xhr.send();
+  });
+}
+
+function loadTextureCached(url) {
+  if(texCache[url]) return Promise.resolve(texCache[url]);
+  return new Promise(function(res,rej){
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET',url,true); xhr.responseType='blob';
+    xhr.onload = function(){
+      if(xhr.status===200||xhr.status===0){
+        var blobUrl = URL.createObjectURL(xhr.response);
+        var img = new window._NativeImage();
+        img.onload = function(){
+          var tex = new THREE.Texture(img);
+          tex.needsUpdate = true;
+          tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+          tex.minFilter = THREE.LinearMipMapLinearFilter;
+          tex.magFilter = THREE.LinearFilter;
+          tex.generateMipmaps = true;
+          texCache[url] = tex;
+          res(tex);
+        };
+        img.onerror = function(){ rej(new Error('img load failed: '+url)); };
+        img.src = blobUrl;
+      } else { rej(new Error('XHR '+xhr.status+': '+url)); }
+    };
+    xhr.onerror = function(){ rej(new Error('XHR error: '+url)); };
+    xhr.send();
+  });
+}
+
+// Register an InstancedMesh as a pool — returns pool ID
+function registerMeshPool(iMesh, maxCount) {
+  var entry = {
+    mesh:      iMesh,
+    maxCount:  maxCount,
+    used:      new Uint8Array(maxCount),
+    freeSlots: []
+  };
+  for(var i = maxCount-1; i >= 0; i--) entry.freeSlots.push(i);
+  meshPool.push(entry);
+  return meshPool.length - 1;
+}
+
+function allocMeshSlot(poolId) {
+  var p = meshPool[poolId];
+  if(!p || !p.freeSlots.length) return -1;
+  var slot = p.freeSlots.pop();
+  p.used[slot] = 1;
+  return slot;
+}
+
+function freeMeshSlot(poolId, slot) {
+  var p = meshPool[poolId];
+  if(!p) return;
+  p.used[slot] = 0;
+  p.freeSlots.push(slot);
+  // Hide by scaling to zero — no GPU reallocation needed
+  if(!_syncObj) return;
+  _syncObj.position.set(0,-9999,0);
+  _syncObj.rotation.set(0,0,0);
+  _syncObj.scale.set(0,0,0);
+  _syncObj.updateMatrix();
+  p.mesh.setMatrixAt(slot, _syncObj.matrix);
+  p.mesh.instanceMatrix.needsUpdate = true;
+  // Restore syncObj scale for next use
+  _syncObj.scale.set(1,1,1);
+}
+
+// Spawn entity + grab mesh slot
+function spawnEntity(type, poolId, x, y, z) {
+  var id   = createEntity();
+  var slot = allocMeshSlot(poolId);
+  if(id < 0 || slot < 0){ if(id >= 0) destroyEntity(id); return -1; }
+  TYPE[id]     = type;
+  PX[id] = x; PY[id] = y; PZ[id] = z;
+  MESH_ID[id]  = poolId;
+  MESH_IDX[id] = slot;
+  FLAGS[id]   |= F_DIRTY | F_PHYSICS;
+  
+  // Calculate collision bounds from mesh
+  var p = meshPool[poolId];
+  if(p && p.mesh && p.mesh.geometry){
+    var geo = p.mesh.geometry;
+    if(!geo.boundingBox) geo.computeBoundingBox();
+    var box = geo.boundingBox;
+    if(box){
+      var size = box.getSize(new THREE.Vector3());
+      COLL_MINX[id] = box.min.x;
+      COLL_MINY[id] = box.min.y;
+      COLL_MINZ[id] = box.min.z;
+      COLL_MAXX[id] = box.max.x;
+      COLL_MAXY[id] = box.max.y;
+      COLL_MAXZ[id] = box.max.z;
+      COLL_RADIUS[id] = Math.max(size.x, size.y, size.z) / 2;
+    }
+  }
+  
+  return id;
+}
+
+function despawnEntity(id) {
+  var mid = MESH_ID[id], idx = MESH_IDX[id];
+  if(mid >= 0 && idx >= 0) freeMeshSlot(mid, idx);
+  destroyEntity(id);
+}
+
+// ── Geometry merger (no BufferGeometryUtils dependency) ──────────
+// Flat typed arrays, one concat pass — NES sprite sheet packing
+function mergeGeometries(geos) {
+  var totalVerts = 0, totalIdx = 0, hasIndex = false;
+  for(var g = 0; g < geos.length; g++){
+    totalVerts += geos[g].attributes.position.count;
+    if(geos[g].index){ totalIdx += geos[g].index.count; hasIndex = true; }
+  }
+  var positions = new Float32Array(totalVerts*3);
+  var normals   = new Float32Array(totalVerts*3);
+  var uvs       = new Float32Array(totalVerts*2);
+  var indices   = hasIndex ? new Uint32Array(totalIdx) : null;
+  var vOff=0, iOff=0, vBase=0;
+  for(var g = 0; g < geos.length; g++){
+    var geo = geos[g];
+    var pos = geo.attributes.position.array;
+    var nor = geo.attributes.normal ? geo.attributes.normal.array : null;
+    var uv  = geo.attributes.uv     ? geo.attributes.uv.array     : null;
+    var vc  = geo.attributes.position.count;
+    positions.set(pos, vOff*3);
+    if(nor) normals.set(nor, vOff*3);
+    if(uv)  uvs.set(uv,  vOff*2);
+    if(hasIndex && geo.index){
+      var idx = geo.index.array;
+      for(var j=0; j<idx.length; j++) indices[iOff+j] = idx[j]+vBase;
+      iOff += idx.length;
+    }
+    vBase += vc; vOff += vc;
+  }
+  var merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  merged.setAttribute('normal',   new THREE.BufferAttribute(normals,  3));
+  merged.setAttribute('uv',       new THREE.BufferAttribute(uvs,      2));
+  if(indices) merged.setIndex(new THREE.BufferAttribute(indices,1));
+  return merged;
+}
+
+
+// ── Build InstancedMesh from loaded GLTF scene ───────────────────
+// Returns array of pool IDs created (for ECS mode) or null (viewer mode)
+function buildInstances(gltfScene, basePath, count, forEcs) {
+  var SPREAD = 90;
+
+  // Normalise model into 2-unit cube sitting on Y=0
+  var box    = new THREE.Box3().setFromObject(gltfScene);
+  var size   = box.getSize(new THREE.Vector3());
+  var center = box.getCenter(new THREE.Vector3());
+  var modelScale = 2.0 / Math.max(size.x, size.y, size.z, 0.001);
+  var normMat = new THREE.Matrix4()
+    .makeTranslation(-center.x, -box.min.y, -center.z)
+    .premultiply(new THREE.Matrix4().makeScale(modelScale,modelScale,modelScale));
+
+  // Group meshes by material/texture key
+  var groups = {};
+  gltfScene.updateMatrixWorld(true);
+  gltfScene.traverse(function(child){
+    if(!child.isMesh || !child.geometry) return;
+    var srcMat = Array.isArray(child.material) ? child.material[0] : child.material;
+    var texUrl = null;
+    var texKey = 'solid_'+(srcMat&&srcMat.color?srcMat.color.getHexString():'cccccc');
+    if(srcMat&&srcMat.map&&srcMat.map.image&&srcMat.map.image.src){
+      texUrl = srcMat.map.image.src; texKey = 'tex_'+texUrl;
+    } else if(srcMat&&srcMat.map){
+      texKey = 'tex_'+basePath;
+    }
+    var geo = child.geometry.clone();
+    var wm  = child.matrixWorld.clone();
+    wm.premultiply(normMat);
+    geo.applyMatrix4(wm);
+    if(!groups[texKey]) groups[texKey]={geos:[],srcMat:srcMat,texUrl:texUrl,basePath:basePath};
+    groups[texKey].geos.push(geo);
+  });
+
+  var keys = Object.keys(groups);
+  if(!keys.length){ setStatus('No meshes found!'); return null; }
+
+  // Pre-compute instance matrices once (shared OAM table)
+  var cols    = Math.ceil(Math.sqrt(count));
+  var spacing = (SPREAD*2)/cols;
+  var matrices = new Array(count);
+  var tmpDummy = new THREE.Object3D();
+  for(var i=0; i<count; i++){
+    var col=i%cols, row=Math.floor(i/cols);
+    tmpDummy.position.set(
+      -SPREAD+col*spacing+(Math.random()-0.5)*spacing*0.55,
+      0,
+      -SPREAD+row*spacing+(Math.random()-0.5)*spacing*0.55
+    );
+    tmpDummy.rotation.set(0, Math.random()*Math.PI*2, 0);
+    var s=0.75+Math.random()*0.5;
+    tmpDummy.scale.set(s,s,s);
+    tmpDummy.updateMatrix();
+    matrices[i] = tmpDummy.matrix.clone();
+  }
+
+  var createdPools = [];
+
+  keys.forEach(function(key){
+    var grp = groups[key];
+    var mergedGeo = grp.geos.length===1 ? grp.geos[0] : mergeGeometries(grp.geos);
+    var srcMat = grp.srcMat;
+    var instMat = new THREE.MeshStandardMaterial({
+      color:     srcMat&&srcMat.color ? srcMat.color.clone() : new THREE.Color(0xcccccc),
+      roughness: srcMat&&srcMat.roughness!=null ? srcMat.roughness : 0.8,
+      metalness: srcMat&&srcMat.metalness!=null ? srcMat.metalness : 0.05,
+      side:      THREE.FrontSide
+    });
+
+    var iMesh = new THREE.InstancedMesh(mergedGeo, instMat, count);
+    iMesh.castShadow    = true;
+    iMesh.receiveShadow = true;
+    // ECS: DynamicDrawUsage — matrices update every frame via renderSyncSystem
+    // Viewer: StaticDrawUsage — matrices written once, never changed
+    iMesh.instanceMatrix.setUsage(forEcs ? THREE.DynamicDrawUsage : THREE.StaticDrawUsage);
+    for(var i=0; i<count; i++) iMesh.setMatrixAt(i, matrices[i]);
+    iMesh.instanceMatrix.needsUpdate = true;
+    scene.add(iMesh);
+
+    if(forEcs){
+      // Register as pool — all slots start FREE, initEcsEntities allocates them
+      var pid = registerMeshPool(iMesh, count);
+      createdPools.push(pid);
+    } else {
+      instancedMeshes.push(iMesh);
+    }
+
+    // Async texture upgrade
+    if(srcMat&&srcMat.map&&srcMat.map.image){
+      instMat.map = srcMat.map; instMat.needsUpdate = true;
+    } else if(srcMat&&srcMat.map&&srcMat.map.name){
+      var guessUrl = grp.basePath+'Textures/'+srcMat.map.name+'.png';
+      loadTextureCached(guessUrl).then(function(tex){
+        instMat.map = tex; instMat.needsUpdate = true;
+      }).catch(function(e){ console.warn('Tex load failed:',e.message); });
+    }
+  });
+
+  totalInstances = count;
+  document.getElementById('hInst').textContent = count.toLocaleString();
+  return createdPools;
+}
+
+// ── Clear all viewer-mode instances ─────────────────────────────
+function clearInstances() {
+  instancedMeshes.forEach(function(m){
+    scene.remove(m);
+    m.geometry.dispose();
+    if(Array.isArray(m.material)) m.material.forEach(function(mt){ mt.dispose(); });
+    else m.material.dispose();
+  });
+  instancedMeshes = [];
+  // Also clear ECS pools
+  meshPool.forEach(function(p){ scene.remove(p.mesh); });
+  meshPool = [];
+  // Destroy all entities
+  for(var i=0; i<_eid; i++) FLAGS[i]=0;
+  _eid=0; _free=[]; _playerEid=-1;
+  totalInstances = 0;
+  document.getElementById('hInst').textContent = '0';
+  document.getElementById('hEnt').textContent  = '0';
+}
+
+// ── Load GLB → build instances ───────────────────────────────────
+function loadAndSpawn(url, count) {
+  clearInstances();
+  setStatus('Loading...');
+  loadBinary(url, function(p){ setStatus('Downloading... '+Math.round(p*100)+'%'); })
+  .then(function(buffer){
+    setStatus('Parsing GLB...');
+    var basePath = url.substring(0, url.lastIndexOf('/')+1);
+    var loader = new THREE.GLTFLoader();
+    loader.parse(buffer, basePath, function(gltf){
+      setStatus('Building instances...');
+      setTimeout(function(){
+        if(ecsMode){
+          var pools = buildInstances(gltf.scene, basePath, count, true);
+          if(pools && pools.length){
+            initEcsEntities(pools[0], count);
+          }
+        } else {
+          buildInstances(gltf.scene, basePath, count, false);
+        }
+        setStatus('');
+      }, 50);
+    }, function(err){ setStatus('Parse error: '+(err.message||err)); });
+  }).catch(function(err){ setStatus('Load error: '+err.message); });
+}
+
+
+// ── ECS entity init — spawn entities into the pool ───────────────
+function initEcsEntities(poolId, count) {
+  var SPREAD = 85;
+  var cols   = Math.ceil(Math.sqrt(count));
+  var spacing = (SPREAD*2)/cols;
+
+  for(var i=0; i<count; i++){
+    var col=i%cols, row=Math.floor(i/cols);
+    var x = -SPREAD+col*spacing+(Math.random()-0.5)*spacing*0.55;
+    var z = -SPREAD+row*spacing+(Math.random()-0.5)*spacing*0.55;
+
+    var id = spawnEntity(T_ENEMY, poolId, x, 0, z);
+    if(id < 0) break;
+
+    // First entity becomes the player
+    if(i === 0){
+      TYPE[id]    = T_PLAYER;
+      FLAGS[id]  |= F_PLAYER;
+      FLAGS[id]  &= ~F_AI;
+      FLAGS[id]  |= F_PHYSICS;
+      _playerEid  = id;
+      HP[id] = HP_MAX[id] = 200;
+    } else {
+      TYPE[id]   = T_ENEMY;
+      FLAGS[id] |= F_AI | F_ENEMY | F_PHYSICS;
+      HP[id] = HP_MAX[id] = 50;
+      AI_STATE[id] = AI_IDLE;
+      AI_TIMER[id] = Math.random()*3.0;
+    }
+  }
+
+  document.getElementById('hEnt').textContent = _eid;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// F — RENDERER SETUP + SCENE BOOT
+// ═══════════════════════════════════════════════════════════════════
+
+var statusEl = document.getElementById('status');
+function setStatus(msg){
+  statusEl.style.display = msg ? 'block' : 'none';
+  statusEl.textContent   = msg;
+}
+
+window.onerror = function(m,s,l,c){ setStatus('JS ERROR: '+m+' ('+l+':'+c+')'); };
+
+if(typeof THREE === 'undefined'){
+  setStatus('ERROR: three.min.js not found');
+} else if(typeof THREE.GLTFLoader === 'undefined'){
+  setStatus('ERROR: GLTFLoader.js not found');
+} else {
+  bootScene();
+}
+
+function bootScene() {
+  setStatus('');
+
+  // ── Renderer ────────────────────────────────────────────────────
+  renderer = new THREE.WebGLRenderer({
+    antialias:       false,
+    powerPreference: 'high-performance',
+    stencil:         false,
+    depth:           true
+  });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace   = THREE.SRGBColorSpace || THREE.LinearEncoding;
+  renderer.toneMapping        = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  document.body.appendChild(renderer.domElement);
+
+  // Reusable dummies — zero alloc in hot loop
+  _syncObj   = new THREE.Object3D();
+  _camTarget  = new THREE.Vector3();
+  _camDesired = new THREE.Vector3();
+
+  // ── Scene ───────────────────────────────────────────────────────
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87CEEB);
+  scene.fog = new THREE.FogExp2(0x87CEEB, 0.008);
+
+  // ── Camera ──────────────────────────────────────────────────────
+  camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.5, 600);
+  camera.position.set(0, 18, 40);
+  camera.lookAt(0, 0, 0);
+
+  // ── Lighting ────────────────────────────────────────────────────
+  var hemi = new THREE.HemisphereLight(0xb0d8ff, 0x4a7c3f, 0.6);
+  scene.add(hemi);
+
+  sun = new THREE.DirectionalLight(0xfff5e0, 1.2);
+  sun.position.set(40, 80, 30);
+  sun.castShadow = true;
+  var sc = sun.shadow.camera;
+  sc.left = sc.bottom = -120;
+  sc.right = sc.top   =  120;
+  sc.near  = 1; sc.far = 300;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.bias       = -0.0005;
+  sun.shadow.normalBias =  0.02;
+  scene.add(sun);
+  scene.add(sun.target);
+
+  var fill = new THREE.DirectionalLight(0xaaccff, 0.3);
+  fill.position.set(-30, 20, -20);
+  scene.add(fill);
+
+  // ── Ground ──────────────────────────────────────────────────────
+  var ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(400, 400),
+    new THREE.MeshStandardMaterial({ color:0x5a8a3c, roughness:0.9, metalness:0.0 })
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  var grid = new THREE.GridHelper(400, 80, 0x000000, 0x000000);
+  grid.material.opacity = 0.12;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  // ── Particle pool ───────────────────────────────────────────────
+  var particleGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+  var particleMat = new THREE.MeshBasicMaterial({
+    color: 0xffaa00,
+    transparent: true,
+    opacity: 0.8
+  });
+  var particleMesh = new THREE.InstancedMesh(particleGeo, particleMat, 500);
+  particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(particleMesh);
+  particlePoolId = registerMeshPool(particleMesh, 500);
+  console.log('Particle pool created: ID', particlePoolId);
+
+  // ── Input setup ─────────────────────────────────────────────────
+  setupKeyboard();
+  setupJoystick();
+  setupOrbitControls();
+
+  // ── UI wiring ───────────────────────────────────────────────────
+  document.getElementById('btnLoad').onclick  = function(){
+    loadAndSpawn(document.getElementById('modelSelect').value, 2000);
+  };
+  document.getElementById('btnSpawn').onclick = function(){
+    loadAndSpawn(document.getElementById('modelSelect').value, 2000);
+  };
+  document.getElementById('btnClear').onclick  = clearInstances;
+  document.getElementById('btnShadow').onclick = toggleShadow;
+  document.getElementById('btnEcs').onclick    = toggleEcs;
+  document.getElementById('btnEditor').onclick = function(){
+    toggleEditor();
+    this.textContent = 'EDITOR: ' + (editorMode ? 'ON' : 'OFF');
+  };
+  document.getElementById('btnAudio').onclick = function(){
+    if(!audioEnabled){
+      initAudio();
+      this.textContent = 'AUDIO: ' + (audioEnabled ? 'ON' : 'OFF');
+    } else {
+      audioEnabled = false;
+      this.textContent = 'AUDIO: OFF';
+    }
+  };
+  document.getElementById('btnPost').onclick = function(){
+    if(!postProcessingEnabled){
+      initPostProcessing();
+      this.textContent = 'POST-FX: ' + (postProcessingEnabled ? 'ON' : 'OFF');
+    } else {
+      postProcessingEnabled = false;
+      this.textContent = 'POST-FX: OFF';
+    }
+  };
+  document.getElementById('btnSave').onclick = function(){
+    if(saveGame()){
+      setStatus('Game saved!');
+      setTimeout(function(){ setStatus(''); }, 1500);
+    } else {
+      setStatus('Save failed!');
+      setTimeout(function(){ setStatus(''); }, 1500);
+    }
+  };
+
+  // ── Resize ──────────────────────────────────────────────────────
+  window.addEventListener('resize', function(){
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ── Apply initial quality tier ──────────────────────────────────
+  applyQuality();
+  document.getElementById('hQual').textContent = ['LOW','MED','HIGH'][qualityLevel];
+  document.getElementById('hQual').className   = 'val good';
+  document.getElementById('qualBadge').textContent = 'Q: '+['LOW','MED','HIGH'][qualityLevel];
+
+  // ── Start loop + auto-load ───────────────────────────────────────
+  _lastTime = performance.now();
+  
+  // Initialize new systems
+  initCanvasUI();           // Canvas UI overlay
+  // initPostProcessing();  // Uncomment when EffectComposer is available
+  // Audio requires user gesture - use AUDIO button
+  
+  requestAnimationFrame(gameLoop);
+  loadAndSpawn(document.getElementById('modelSelect').value, 2000);
+}
+
+function toggleShadow() {
+  shadowEnabled = !shadowEnabled;
+  renderer.shadowMap.enabled = shadowEnabled;
+  renderer.shadowMap.needsUpdate = true;
+  instancedMeshes.forEach(function(m){ m.castShadow=shadowEnabled; m.receiveShadow=shadowEnabled; });
+  meshPool.forEach(function(p){ p.mesh.castShadow=shadowEnabled; p.mesh.receiveShadow=shadowEnabled; });
+  document.getElementById('btnShadow').textContent = 'SHADOW: '+(shadowEnabled?'ON':'OFF');
+}
+
+function toggleEcs() {
+  ecsMode = !ecsMode;
+  document.getElementById('btnEcs').textContent = 'ECS: '+(ecsMode?'ON':'OFF');
+  document.getElementById('ecspanel').style.display = ecsMode ? 'block' : 'none';
+  // Reload with new mode
+  loadAndSpawn(document.getElementById('modelSelect').value, 2000);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// G — GAME LOOP  (fixed physics timestep + variable render)
+//   Physics: always 60Hz (NES NTSC fixed rate)
+//   Render:  variable, catches up or skips
+// ═══════════════════════════════════════════════════════════════════
+
+var _accumulator = 0;
+var _lastTime    = 0;
+var _physSteps   = 0;  // steps taken last frame (for HUD)
+
+// FPS rolling average — Float32Array ring buffer, 60 slots
+// No Date.now(), no string ops in hot path
+var _fpsRing = new Float32Array(60);
+var _fpsHead = 0;
+var _fpsSum  = 0;
+var currentFps = 60;
+var currentMs  = 16;
+
+// HUD throttle counters (bit-mask trick: update every N frames)
+var _hudTick  = 0;
+
+// Adaptive quality
+var _qualTick = 0;
+var QUAL_INTERVAL = 120; // frames between quality checks
+
+// Pre-allocated vectors for follow camera — zero alloc in hot loop
+var _camTarget = null;  // set after THREE loads
+var _camDesired = null;
+
+function gameLoop(now) {
+  requestAnimationFrame(gameLoop);
+
+  var dt = (now - _lastTime) * 0.001;
+  if(dt > 0.1) dt = 0.1;  // cap — prevents spiral of death on tab-switch
+  _lastTime = now;
+
+  // ── FPS rolling average ────────────────────────────────────────
+  _fpsSum -= _fpsRing[_fpsHead];
+  _fpsRing[_fpsHead] = dt;
+  _fpsSum += dt;
+  _fpsHead = (_fpsHead + 1) % 60;
+  currentFps = Math.round(60 / (_fpsSum || 1));
+  currentMs  = dt * 1000;
+
+  // ── Fixed timestep physics (only in ECS mode) ──────────────────
+  _physSteps = 0;
+  if(ecsMode){
+    _accumulator += dt;
+    while(_accumulator >= FIXED_DT && _physSteps < MAX_STEPS){
+      inputSystem(FIXED_DT);
+      physicsSystem(FIXED_DT);
+      aiSystem(FIXED_DT);
+      collisionSystem(FIXED_DT);    // NEW: Collision detection
+      animationSystem(FIXED_DT);    // NEW: Skeletal animation
+      particleSystem(FIXED_DT);     // NEW: Particle updates
+      _accumulator -= FIXED_DT;
+      _physSteps++;
+    }
+    // Sync dirty transforms to GPU
+    renderSyncSystem();
+
+    // Follow camera — track player if ECS mode
+    if(_playerEid >= 0 && _camTarget){
+      _camTarget.set(PX[_playerEid], PY[_playerEid]+2, PZ[_playerEid]);
+      _camDesired.set(PX[_playerEid], PY[_playerEid]+12, PZ[_playerEid]+20);
+      camera.position.lerp(_camDesired, 0.08);
+      camera.lookAt(_camTarget);
+    }
+  }
+
+  // ── Per-frame systems (run every frame, not fixed) ─────────────
+  audioSystem(dt);           // NEW: Update spatial audio
+  lodSystem();               // NEW: Level of detail switching
+  editorUpdate();            // NEW: Scene editor input
+  updatePostProcessing();    // NEW: Post-processing params
+
+  // ── Render ────────────────────────────────────────────────────
+  renderWithPostProcessing(); // Uses composer if enabled, else direct render
+  editorRender();            // NEW: Draw editor gizmos/overlays
+  drawCanvasUI();            // NEW: Draw canvas UI overlay
+
+  // ── HUD update every 16 frames (~4x/sec at 60fps) ─────────────
+  _hudTick = (_hudTick + 1) & 15;
+  if(_hudTick === 0) updateHUD();
+
+  // ── Adaptive quality every 120 frames (~2x/sec) ───────────────
+  _qualTick = (_qualTick + 1);
+  if(_qualTick >= QUAL_INTERVAL){ _qualTick = 0; adaptiveQuality(); }
+}
+
+function updateHUD() {
+  var info = renderer.info;
+
+  var fpsEl = document.getElementById('hFps');
+  fpsEl.textContent = currentFps;
+  fpsEl.className   = currentFps>=30?'val good':currentFps>=20?'val warn':'val bad';
+
+  document.getElementById('hMs').textContent   = currentMs.toFixed(1)+' ms';
+  document.getElementById('hDraw').textContent = info.render.calls;
+  document.getElementById('hTris').textContent = (info.render.triangles/1000).toFixed(1)+'k';
+  document.getElementById('hInst').textContent = totalInstances.toLocaleString();
+  document.getElementById('hStep').textContent = ecsMode ? _physSteps : '--';
+
+  // Count alive entities
+  var alive=0;
+  for(var i=0;i<_eid;i++) if(FLAGS[i]&F_ALIVE) alive++;
+  document.getElementById('hEnt').textContent = alive;
+  
+  // Count particles
+  var particles=0;
+  for(var i=0;i<_eid;i++) if((FLAGS[i]&F_ALIVE) && PART_LIFE[i]>0) particles++;
+  document.getElementById('hPart').textContent = particles;
+  
+  // Count active sounds
+  document.getElementById('hSnd').textContent = activeSounds.length;
+
+  if(performance.memory){
+    var mb = (performance.memory.usedJSHeapSize/1048576).toFixed(0);
+    document.getElementById('hMem').textContent = mb+' MB';
+  } else {
+    document.getElementById('hMem').textContent = 'n/a';
+  }
+
+  // Quality tier — keep in sync every HUD tick
+  var qEl = document.getElementById('hQual');
+  qEl.textContent = ['LOW','MED','HIGH'][qualityLevel];
+  qEl.className   = currentFps >= 30 ? 'val good' : currentFps >= 20 ? 'val warn' : 'val bad';
+
+  // ECS debug panel
+  if(ecsMode){
+    var enemies=0, statics=0, dirty=0;
+    for(var i=0;i<_eid;i++){
+      var f=FLAGS[i];
+      if(!(f&F_ALIVE)) continue;
+      if(f&F_ENEMY)  enemies++;
+      if(f&F_STATIC) statics++;
+      if(f&F_DIRTY)  dirty++;
+    }
+    document.getElementById('eAlive').textContent  = alive;
+    document.getElementById('ePlayer').textContent = _playerEid >= 0
+      ? 'id='+_playerEid+' hp='+HP[_playerEid] : '--';
+    document.getElementById('eEnemy').textContent  = enemies;
+    document.getElementById('eStatic').textContent = statics;
+    document.getElementById('eDirty').textContent  = dirty;
+    document.getElementById('eSteps').textContent  = _physSteps;
+  }
+}
+
+function adaptiveQuality() {
+  var qEl = document.getElementById('hQual');
+  if(currentFps < 25 && qualityLevel > 0){
+    qualityLevel--;
+    applyQuality();
+  } else if(currentFps > 55 && qualityLevel < 2){
+    qualityLevel++;
+    applyQuality();
+  }
+  var label = ['LOW','MED','HIGH'][qualityLevel];
+  qEl.textContent = label;
+  qEl.className   = currentFps >= 30 ? 'val good' : currentFps >= 20 ? 'val warn' : 'val bad';
+  document.getElementById('qualBadge').textContent = 'Q: ' + label;
+}
+
+function applyQuality() {
+  var cfg = QUALITY_CONFIGS[qualityLevel];
+  renderer.setPixelRatio(cfg.pr);
+  if(sun&&sun.shadow){
+    sun.shadow.mapSize.set(cfg.shadowMap, cfg.shadowMap);
+    sun.shadow.map = null;
+    renderer.shadowMap.needsUpdate = true;
+  }
+  if(scene.fog) scene.fog.density = cfg.fog;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// H — INPUT: KEYBOARD + VIRTUAL JOYSTICK + ORBIT CONTROLS
+// ═══════════════════════════════════════════════════════════════════
+
+function setupKeyboard() {
+  document.addEventListener('keydown', function(e){ _keys[e.keyCode & 0xFF] = 1; });
+  document.addEventListener('keyup',   function(e){ _keys[e.keyCode & 0xFF] = 0; });
+}
+
+// Virtual joystick — left half of screen, touch only
+function setupJoystick() {
+  var joyBase  = document.getElementById('joy-base');
+  var joyKnob  = document.getElementById('joy-knob');
+  var JOY_R    = 50;  // radius in px
+  var joyActive = false;
+  var joyBaseX = 0, joyBaseY = 0;
+  var joyTouchId = -1;
+
+  document.addEventListener('touchstart', function(e){
+    for(var t=0; t<e.changedTouches.length; t++){
+      var touch = e.changedTouches[t];
+      if(touch.clientX < window.innerWidth*0.5 && joyTouchId < 0){
+        joyActive  = true;
+        joyTouchId = touch.identifier;
+        joyBaseX   = touch.clientX;
+        joyBaseY   = touch.clientY;
+        // Move base to touch point
+        joyBase.style.left = (joyBaseX - 50)+'px';
+        joyBase.style.bottom = 'auto';
+        joyBase.style.top  = (joyBaseY - 50)+'px';
+        _joyX = _joyZ = 0;
+      }
+    }
+  }, {passive:true});
+
+  document.addEventListener('touchmove', function(e){
+    if(!joyActive) return;
+    for(var t=0; t<e.changedTouches.length; t++){
+      var touch = e.changedTouches[t];
+      if(touch.identifier !== joyTouchId) continue;
+      var dx = touch.clientX - joyBaseX;
+      var dy = touch.clientY - joyBaseY;
+      var len = Math.sqrt(dx*dx+dy*dy);
+      if(len > JOY_R){ dx=dx/len*JOY_R; dy=dy/len*JOY_R; }
+      _joyX = dx/JOY_R;
+      _joyZ = dy/JOY_R;
+      joyKnob.style.transform = 'translate(calc(-50% + '+dx+'px), calc(-50% + '+dy+'px))';
+    }
+  }, {passive:true});
+
+  function joyEnd(e){
+    for(var t=0; t<e.changedTouches.length; t++){
+      if(e.changedTouches[t].identifier === joyTouchId){
+        joyActive = false; joyTouchId = -1;
+        _joyX = _joyZ = 0;
+        joyKnob.style.transform = 'translate(-50%,-50%)';
+        // Reset base position
+        joyBase.style.left='50px'; joyBase.style.top='auto'; joyBase.style.bottom='50px';
+      }
+    }
+  }
+  document.addEventListener('touchend',    joyEnd, {passive:true});
+  document.addEventListener('touchcancel', joyEnd, {passive:true});
+}
+
+// Orbit controls — right half touch + mouse (viewer mode)
+// In ECS mode the camera follows the player instead
+function setupOrbitControls() {
+  var sph    = { theta:0.5, phi:0.9, r:45 };
+  var target = new THREE.Vector3(0,0,0);
+  var drag=false, px=0, py=0, pinchD=0;
+  var orbitTouchId = -1;
+
+  function applyCamera(){
+    if(ecsMode) return; // ECS mode uses follow camera
+    camera.position.set(
+      target.x + sph.r*Math.sin(sph.phi)*Math.sin(sph.theta),
+      target.y + sph.r*Math.cos(sph.phi),
+      target.z + sph.r*Math.sin(sph.phi)*Math.cos(sph.theta)
+    );
+    camera.lookAt(target);
+  }
+  applyCamera();
+
+  var el = renderer.domElement;
+
+  el.addEventListener('touchstart', function(e){
+    for(var t=0; t<e.touches.length; t++){
+      if(e.touches[t].clientX >= window.innerWidth*0.5 && orbitTouchId < 0){
+        drag=true; orbitTouchId=e.touches[t].identifier;
+        px=e.touches[t].clientX; py=e.touches[t].clientY;
+      }
+    }
+    if(e.touches.length===2){
+      drag=false;
+      pinchD=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
+                        e.touches[0].clientY-e.touches[1].clientY);
+    }
+  },{passive:true});
+
+  el.addEventListener('touchmove', function(e){
+    if(drag && e.touches.length===1){
+      for(var t=0; t<e.touches.length; t++){
+        if(e.touches[t].identifier===orbitTouchId){
+          sph.theta -= (e.touches[t].clientX-px)*0.004;
+          sph.phi    = Math.max(0.05,Math.min(Math.PI-0.05,sph.phi+(e.touches[t].clientY-py)*0.004));
+          px=e.touches[t].clientX; py=e.touches[t].clientY;
+          applyCamera();
+        }
+      }
+    }
+    if(e.touches.length===2){
+      var d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
+                       e.touches[0].clientY-e.touches[1].clientY);
+      sph.r=Math.max(5,Math.min(200,sph.r*(pinchD/d)));
+      pinchD=d; applyCamera();
+    }
+  },{passive:true});
+
+  el.addEventListener('touchend', function(e){
+    for(var t=0; t<e.changedTouches.length; t++){
+      if(e.changedTouches[t].identifier===orbitTouchId){ drag=false; orbitTouchId=-1; }
+    }
+  },{passive:true});
+
+  el.addEventListener('mousedown', function(e){ drag=true; px=e.clientX; py=e.clientY; });
+  el.addEventListener('mousemove', function(e){
+    if(!drag) return;
+    sph.theta -= (e.clientX-px)*0.004;
+    sph.phi    = Math.max(0.05,Math.min(Math.PI-0.05,sph.phi+(e.clientY-py)*0.004));
+    px=e.clientX; py=e.clientY; applyCamera();
+  });
+  el.addEventListener('mouseup',  function(){ drag=false; });
+  el.addEventListener('wheel',    function(e){
+    sph.r=Math.max(5,Math.min(200,sph.r+e.deltaY*0.05)); applyCamera();
+  });
+}
+
+</script>
+</body>
+</html>

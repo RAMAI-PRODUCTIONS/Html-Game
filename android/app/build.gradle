@@ -1,9 +1,9 @@
 apply plugin: 'com.android.application'
 android {
-    namespace 'com.ramai.glbviewer'
+    namespace 'com.ramai.ramai'
     compileSdk 34
     defaultConfig {
-        applicationId "com.ramai.glbviewer"
+        applicationId "com.ramai.ramai"
         minSdk 21
         targetSdk 34
         versionCode 
@@ -13,7 +13,6 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
-    aaptOptions { noCompress 'glb', 'gltf', 'bin' }
 }
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
